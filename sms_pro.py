@@ -2,7 +2,6 @@ import serial
 import time
 import threading
 import logging
-from datetime import datetime
 
 from flask import Flask, render_template_string, request, jsonify
 from flask_socketio import SocketIO
@@ -14,24 +13,8 @@ app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 lock = threading.Lock()
-history_lock = threading.Lock()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
-message_counter = 0
-INBOX = []
-OUTBOX = []
-SENT = []
-
-
-def now_iso():
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-
-def next_local_id():
-    global message_counter
-    with history_lock:
-        message_counter += 1
-        return message_counter
 
 
 def _open_serial():
@@ -56,16 +39,6 @@ def send_sms(numbers, message):
         number = number.strip()
         if not number:
             continue
-        record = {
-            "id": next_local_id(),
-            "number": number,
-            "message": message,
-            "created_at": now_iso(),
-            "status": "queued",
-            "modem_response": "",
-        }
-        with history_lock:
-            OUTBOX.insert(0, record)
         with lock:
             with _open_serial() as ser:
                 time.sleep(0.2)
@@ -83,17 +56,7 @@ def send_sms(numbers, message):
                 time.sleep(3)
 
                 resp = ser.read_all().decode(errors="ignore")
-                record["modem_response"] = resp
-                ok = "OK" in resp and "ERROR" not in resp
-                record["status"] = "sent" if ok else "failed"
-                result.append(record)
-
-        if record["status"] == "sent":
-            with history_lock:
-                SENT.insert(0, record.copy())
-            socketio.emit("sent", record)
-        else:
-            socketio.emit("send_error", record)
+                result.append(f"=== {number} ===\n{resp}")
 
     return result
 
@@ -106,68 +69,19 @@ def delete_sms(index):
     return send_at(f"AT+CMGD={index}")
 
 
-def parse_cmgl(raw):
-    messages = []
-    if not raw:
-        return messages
-
-    lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        if line.startswith("+CMGL:"):
-            header = line
-            body = lines[i + 1] if i + 1 < len(lines) else ""
-            parts = [p.strip() for p in header.split(",")]
-            index = -1
-            status = "UNKNOWN"
-            number = "UNKNOWN"
-            timestamp = ""
-            try:
-                index = int(parts[0].split(":")[1].strip())
-            except Exception:
-                pass
-            if len(parts) > 1:
-                status = parts[1].strip('"')
-            if len(parts) > 2:
-                number = parts[2].strip('"')
-            if len(parts) > 4:
-                timestamp = parts[4].strip('"')
-
-            messages.append(
-                {
-                    "modem_index": index,
-                    "status": status,
-                    "number": number,
-                    "timestamp": timestamp,
-                    "message": body,
-                }
-            )
-            i += 2
-            continue
-        i += 1
-    return messages
-
-
-def refresh_inbox():
-    raw = read_sms()
-    parsed = parse_cmgl(raw)
-    with history_lock:
-        INBOX.clear()
-        INBOX.extend(parsed)
-    return parsed
-
-
 def sms_listener():
     logger.info("SMS listener started on %s", SERIAL_PORT)
     send_at("AT+CNMI=2,1,0,0,0", 1)
 
     while True:
         try:
-            line = send_at("", delay=0.2)
+            with lock:
+                with _open_serial() as ser:
+                    line = ser.readline().decode(errors="ignore")
+
             if "+CMTI:" in line:
-                inbox = refresh_inbox()
-                socketio.emit("inbox", inbox)
+                sms = read_sms()
+                socketio.emit("sms", sms)
         except Exception as exc:
             logger.warning("sms_listener error: %s", exc)
             time.sleep(1)
@@ -188,13 +102,7 @@ def send():
         return jsonify({"status": "error", "error": "Invalid payload"}), 400
 
     response = send_sms(numbers, message)
-    return jsonify({"status": "ok", "results": response})
-
-
-@app.route("/inbox")
-def inbox():
-    return jsonify(refresh_inbox())
-
+    return jsonify({"status": "ok", "modem_response": response})
 
 @app.route("/outbox")
 def outbox():
