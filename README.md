@@ -143,7 +143,7 @@ cd lubancat-sms-pro
 ## 2. Cài dependency
 
 ```
-pip3 install flask flask-socketio pyserial eventlet
+pip3 install flask flask-socketio pyserial
 ```
 
 ---

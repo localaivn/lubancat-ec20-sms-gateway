@@ -1,6 +1,7 @@
 import serial
 import time
 import threading
+import logging
 
 from flask import Flask, render_template_string, request, jsonify
 from flask_socketio import SocketIO
@@ -9,43 +10,53 @@ SERIAL_PORT = "/dev/ttyUSB3"
 BAUD = 115200
 
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 lock = threading.Lock()
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger(__name__)
+
+
+def _open_serial():
+    return serial.Serial(SERIAL_PORT, BAUD, timeout=1)
 
 
 def send_at(cmd, delay=1):
     with lock:
-        ser = serial.Serial(SERIAL_PORT, BAUD, timeout=1)
-        time.sleep(0.5)
-        ser.write((cmd + "\r").encode())
-        time.sleep(delay)
-        resp = ser.read_all().decode(errors="ignore")
-        ser.close()
-        return resp
+        with _open_serial() as ser:
+            time.sleep(0.2)
+            ser.reset_input_buffer()
+            ser.write((cmd + "\r").encode())
+            ser.flush()
+            time.sleep(delay)
+            return ser.read_all().decode(errors="ignore")
 
 
 def send_sms(numbers, message):
     result = []
 
     for number in numbers:
+        number = number.strip()
+        if not number:
+            continue
         with lock:
-            ser = serial.Serial(SERIAL_PORT, BAUD, timeout=1)
-            time.sleep(0.5)
+            with _open_serial() as ser:
+                time.sleep(0.2)
+                ser.reset_input_buffer()
+                ser.write(b'AT+CMGF=1\r')
+                ser.flush()
+                time.sleep(0.5)
 
-            ser.write(b'AT+CMGF=1\r')
-            time.sleep(1)
+                ser.write(f'AT+CMGS="{number}"\r'.encode())
+                ser.flush()
+                time.sleep(0.5)
 
-            ser.write(f'AT+CMGS="{number}"\r'.encode())
-            time.sleep(1)
+                ser.write((message + "\x1A").encode())
+                ser.flush()
+                time.sleep(3)
 
-            ser.write((message + "\x1A").encode())
-            time.sleep(3)
-
-            resp = ser.read_all().decode(errors="ignore")
-            ser.close()
-
-            result.append(resp)
+                resp = ser.read_all().decode(errors="ignore")
+                result.append(f"=== {number} ===\n{resp}")
 
     return "\n".join(result)
 
@@ -59,20 +70,21 @@ def delete_sms(index):
 
 
 def sms_listener():
-    ser = serial.Serial(SERIAL_PORT, BAUD, timeout=1)
-
-    send_at("AT+CNMI=2,1,0,0,0")
+    logger.info("SMS listener started on %s", SERIAL_PORT)
+    send_at("AT+CNMI=2,1,0,0,0", 1)
 
     while True:
         try:
-            line = ser.readline().decode(errors="ignore")
+            with lock:
+                with _open_serial() as ser:
+                    line = ser.readline().decode(errors="ignore")
 
             if "+CMTI:" in line:
                 sms = read_sms()
                 socketio.emit("sms", sms)
-
-        except:
-            pass
+        except Exception as exc:
+            logger.warning("sms_listener error: %s", exc)
+            time.sleep(1)
 
 
 @app.route("/")
@@ -82,12 +94,15 @@ def index():
 
 @app.route("/send", methods=["POST"])
 def send():
-    numbers = request.json["numbers"]
-    message = request.json["message"]
+    payload = request.get_json(silent=True) or {}
+    numbers = payload.get("numbers", [])
+    message = payload.get("message", "")
 
-    send_sms(numbers, message)
+    if not isinstance(numbers, list) or not message:
+        return jsonify({"status": "error", "error": "Invalid payload"}), 400
 
-    return jsonify({"status": "ok"})
+    response = send_sms(numbers, message)
+    return jsonify({"status": "ok", "modem_response": response})
 
 
 @app.route("/read")
@@ -219,4 +234,4 @@ load()
 threading.Thread(target=sms_listener, daemon=True).start()
 
 if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=5000)
+    socketio.run(app, host="0.0.0.0", port=5000, allow_unsafe_werkzeug=True)
