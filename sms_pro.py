@@ -2,7 +2,6 @@ import serial
 import time
 import threading
 import logging
-from datetime import datetime
 
 from flask import Flask, render_template_string, request, jsonify
 from flask_socketio import SocketIO
@@ -15,48 +14,12 @@ app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 lock = threading.Lock()
-history_lock = threading.Lock()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
-message_counter = 0
-INBOX = []
-OUTBOX = []
-SENT = []
-
-
-def now_iso():
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-
-def next_local_id():
-    global message_counter
-    with get_history_lock():
-        message_counter += 1
-        return message_counter
-
-
-def get_history_lock():
-    global history_lock
-    if "history_lock" not in globals() or history_lock is None:
-        history_lock = threading.Lock()
-    return history_lock
 
 
 def _open_serial():
-    return serial.Serial(SERIAL_PORT, BAUD, timeout=SERIAL_TIMEOUT)
-
-
-def _read_available(ser, timeout=1.5):
-    end = time.time() + timeout
-    chunks = []
-    while time.time() < end:
-        waiting = ser.in_waiting
-        if waiting:
-            chunks.append(ser.read(waiting).decode(errors="ignore"))
-            end = time.time() + 0.3
-        else:
-            time.sleep(0.05)
-    return "".join(chunks)
+    return serial.Serial(SERIAL_PORT, BAUD, timeout=1)
 
 
 def send_at(cmd, delay=1):
@@ -64,62 +27,40 @@ def send_at(cmd, delay=1):
         with _open_serial() as ser:
             time.sleep(0.2)
             ser.reset_input_buffer()
-            if cmd:
-                ser.write((cmd + "\r").encode())
-                ser.flush()
+            ser.write((cmd + "\r").encode())
+            ser.flush()
             time.sleep(delay)
-            return _read_available(ser, timeout=max(0.6, delay + 0.6))
+            return ser.read_all().decode(errors="ignore")
 
 
-def send_sms(numbers, message):
-    result = []
+def next_local_id():
+    global message_counter
+    with history_lock:
+        message_counter += 1
+        return message_counter
 
     for number in numbers:
         number = number.strip()
         if not number:
             continue
-        record = {
-            "id": next_local_id(),
-            "number": number,
-            "message": message,
-            "created_at": now_iso(),
-            "status": "queued",
-            "modem_response": "",
-        }
-        with get_history_lock():
-            OUTBOX.insert(0, record)
         with lock:
             with _open_serial() as ser:
                 time.sleep(0.2)
                 ser.reset_input_buffer()
                 ser.write(b'AT+CMGF=1\r')
                 ser.flush()
-                _read_available(ser, timeout=0.8)
+                time.sleep(0.5)
 
                 ser.write(f'AT+CMGS="{number}"\r'.encode())
                 ser.flush()
-                prompt = _read_available(ser, timeout=1.5)
-                if ">" not in prompt:
-                    record["modem_response"] = prompt
-                    record["status"] = "failed"
-                    result.append(record)
-                    socketio.emit("send_error", record)
-                    continue
+                time.sleep(0.5)
 
                 ser.write((message + "\x1A").encode())
                 ser.flush()
-                resp = _read_available(ser, timeout=8.0)
-                record["modem_response"] = resp
-                ok = "OK" in resp and "ERROR" not in resp
-                record["status"] = "sent" if ok else "failed"
-                result.append(record)
+                time.sleep(3)
 
-        if record["status"] == "sent":
-            with get_history_lock():
-                SENT.insert(0, record.copy())
-            socketio.emit("sent", record)
-        else:
-            socketio.emit("send_error", record)
+                resp = ser.read_all().decode(errors="ignore")
+                result.append(f"=== {number} ===\n{resp}")
 
     return result
 
@@ -141,77 +82,19 @@ def delete_sms(index):
     return send_at(f"AT+CMGD={index}")
 
 
-def parse_cmgl(raw):
-    messages = []
-    if not raw:
-        return messages
-
-    lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        if line.startswith("+CMGL:"):
-            header = line
-            body = lines[i + 1] if i + 1 < len(lines) else ""
-            parts = [p.strip() for p in header.split(",")]
-            index = -1
-            status = "UNKNOWN"
-            number = "UNKNOWN"
-            timestamp = ""
-            try:
-                index = int(parts[0].split(":")[1].strip())
-            except Exception:
-                pass
-            if len(parts) > 1:
-                status = parts[1].strip('"')
-            if len(parts) > 2:
-                number = parts[2].strip('"')
-            if len(parts) > 4:
-                timestamp = parts[4].strip('"')
-
-            messages.append(
-                {
-                    "modem_index": index,
-                    "status": status,
-                    "number": number,
-                    "timestamp": timestamp,
-                    "message": body,
-                }
-            )
-            i += 2
-            continue
-        i += 1
-    return messages
-
-
-def refresh_inbox():
-    raw = read_sms()
-    parsed = parse_cmgl(raw)
-    with get_history_lock():
-        INBOX.clear()
-        INBOX.extend(parsed)
-    return parsed
-
-
 def sms_listener():
     logger.info("SMS listener started on %s", SERIAL_PORT)
-    refresh_inbox()
+    send_at("AT+CNMI=2,1,0,0,0", 1)
 
     while True:
         try:
-            with _open_serial() as ser:
-                with lock:
-                    ser.reset_input_buffer()
-                    ser.write(b"AT+CMGF=1\r")
-                    ser.flush()
-                    _read_available(ser, timeout=0.6)
-                    ser.write(b"AT+CNMI=2,1,0,0,0\r")
-                    ser.flush()
-                    _read_available(ser, timeout=0.6)
-                while True:
-                    line = ser.readline().decode(errors="ignore").strip()
-                    if "+CMTI:" in line or "+CMT:" in line:
-                        socketio.emit("inbox", refresh_inbox())
+            with lock:
+                with _open_serial() as ser:
+                    line = ser.readline().decode(errors="ignore")
+
+            if "+CMTI:" in line:
+                sms = read_sms()
+                socketio.emit("sms", sms)
         except Exception as exc:
             logger.warning("sms_listener error: %s", exc)
             time.sleep(1)
@@ -232,31 +115,17 @@ def send():
         return jsonify({"status": "error", "error": "Invalid payload"}), 400
 
     response = send_sms(numbers, message)
-    return jsonify({"status": "ok", "results": response})
-
-
-@app.route("/inbox")
-@app.route("/inbox/")
-def inbox():
-    return jsonify(refresh_inbox())
-
-
-@app.route("/read")
-def read():
-    return jsonify(refresh_inbox())
-
+    return jsonify({"status": "ok", "modem_response": response})
 
 @app.route("/outbox")
-@app.route("/outbox/")
 def outbox():
-    with get_history_lock():
+    with history_lock:
         return jsonify(OUTBOX)
 
 
 @app.route("/sent")
-@app.route("/sent/")
 def sent():
-    with get_history_lock():
+    with history_lock:
         return jsonify(SENT)
 
 
@@ -421,6 +290,4 @@ loadAll();
 threading.Thread(target=sms_listener, daemon=True).start()
 
 if __name__ == "__main__":
-    logger.info("Loaded %s", __file__)
-    logger.info("Routes: %s", sorted(str(rule) for rule in app.url_map.iter_rules()))
     socketio.run(app, host="0.0.0.0", port=5000, allow_unsafe_werkzeug=True)
