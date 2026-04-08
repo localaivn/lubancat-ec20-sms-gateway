@@ -8,6 +8,7 @@ from flask_socketio import SocketIO
 
 SERIAL_PORT = "/dev/ttyUSB3"
 BAUD = 115200
+SERIAL_TIMEOUT = 0.5
 
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
@@ -32,8 +33,11 @@ def send_at(cmd, delay=1):
             return ser.read_all().decode(errors="ignore")
 
 
-def send_sms(numbers, message):
-    result = []
+def next_local_id():
+    global message_counter
+    with history_lock:
+        message_counter += 1
+        return message_counter
 
     for number in numbers:
         number = number.strip()
@@ -62,7 +66,16 @@ def send_sms(numbers, message):
 
 
 def read_sms():
-    return send_at('AT+CMGL="ALL"', 2)
+    with lock:
+        with _open_serial() as ser:
+            time.sleep(0.2)
+            ser.reset_input_buffer()
+            ser.write(b"AT+CMGF=1\r")
+            ser.flush()
+            _read_available(ser, timeout=0.8)
+            ser.write(b'AT+CMGL="ALL"\r')
+            ser.flush()
+            return _read_available(ser, timeout=2.5)
 
 
 def delete_sms(index):
