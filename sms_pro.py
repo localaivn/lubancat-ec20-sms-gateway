@@ -58,7 +58,7 @@ def send_sms(numbers, message):
                 resp = ser.read_all().decode(errors="ignore")
                 result.append(f"=== {number} ===\n{resp}")
 
-    return "\n".join(result)
+    return result
 
 
 def read_sms():
@@ -104,16 +104,23 @@ def send():
     response = send_sms(numbers, message)
     return jsonify({"status": "ok", "modem_response": response})
 
+@app.route("/outbox")
+def outbox():
+    with history_lock:
+        return jsonify(OUTBOX)
 
-@app.route("/read")
-def read():
-    return read_sms()
+
+@app.route("/sent")
+def sent():
+    with history_lock:
+        return jsonify(SENT)
 
 
 @app.route("/delete/<int:index>")
 def delete(index):
-    delete_sms(index)
-    return "OK"
+    resp = delete_sms(index)
+    refresh_inbox()
+    return jsonify({"status": "ok", "modem_response": resp})
 
 
 HTML = """
@@ -121,42 +128,32 @@ HTML = """
 <html>
 <head>
 
-<title>LubanCat SMS Pro</title>
+<title>LubanCat SMS Pro+</title>
 
 <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
 
 <style>
-body {
-font-family: Arial;
-background: #f5f5f5;
-padding: 20px;
-}
-
-.card {
-background: white;
-padding: 20px;
-border-radius: 10px;
-margin-bottom: 20px;
-box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-}
-
-textarea {
-width: 100%;
-height: 100px;
-}
-
-input {
-width: 100%;
-padding: 10px;
-}
-
-button {
-padding: 10px;
-background: #2196F3;
-color: white;
-border: none;
-border-radius: 5px;
-}
+* { box-sizing: border-box; }
+body { margin:0; font-family: Inter, Arial, sans-serif; background:#0f172a; color:#0f172a; }
+.container { max-width:1100px; margin:24px auto; padding:0 16px; }
+.hero { background:linear-gradient(135deg,#2563eb,#9333ea); color:#fff; padding:20px; border-radius:16px; margin-bottom:16px; }
+.layout { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+.card { background:#fff; border-radius:14px; padding:16px; box-shadow:0 10px 20px rgba(2,6,23,.15); }
+.tabs { display:flex; gap:8px; margin-bottom:10px; }
+.tab { border:none; border-radius:999px; padding:8px 12px; background:#e2e8f0; cursor:pointer; font-weight:600; }
+.tab.active { background:#1d4ed8; color:#fff; }
+input, textarea { width:100%; border:1px solid #cbd5e1; border-radius:8px; padding:10px; margin-top:6px; }
+textarea { min-height:110px; resize:vertical; }
+.btn { border:none; border-radius:8px; padding:10px 14px; background:#2563eb; color:#fff; font-weight:700; cursor:pointer; }
+.btn.danger { background:#dc2626; }
+.list { max-height:400px; overflow:auto; display:grid; gap:8px; }
+.item { border:1px solid #e2e8f0; border-radius:10px; padding:10px; background:#f8fafc; }
+.meta { font-size:12px; color:#475569; margin-bottom:6px; display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap; }
+.status { font-size:12px; font-weight:700; padding:2px 8px; border-radius:999px; }
+.status.sent { color:#166534; background:#dcfce7; }
+.status.failed { color:#991b1b; background:#fee2e2; }
+.status.queued { color:#1e3a8a; background:#dbeafe; }
+@media (max-width:900px) { .layout { grid-template-columns:1fr; } }
 
 </style>
 
@@ -164,65 +161,111 @@ border-radius: 5px;
 
 <body>
 
-<h2>LubanCat SMS Pro</h2>
+<div class="container">
+  <div class="hero">
+    <h2 style="margin:0;">📡 LubanCat SMS Pro+</h2>
+    <div>Realtime Inbox / Outbox / Sent with modem control</div>
+  </div>
 
-<div class="card">
-<h3>Send SMS</h3>
+  <div class="layout">
+    <div class="card">
+      <h3>✉️ Send SMS</h3>
+      <label>Numbers (comma separated)</label>
+      <input id="numbers" placeholder="0901111111,0902222222">
+      <label>Message</label>
+      <textarea id="message" placeholder="Type your SMS..."></textarea>
+      <div style="margin-top:10px;">
+        <button class="btn" onclick="sendSMS()">Send</button>
+      </div>
+    </div>
 
-Numbers (comma separated)
-<input id="numbers">
-
-Message
-<textarea id="message"></textarea>
-
-<br><br>
-
-<button onclick="send()">Send</button>
-
-</div>
-
-<div class="card">
-<h3>Inbox</h3>
-
-<pre id="sms"></pre>
-
+    <div class="card">
+      <div class="tabs">
+        <button id="tabInbox" class="tab active" onclick="showTab('inbox')">Inbox</button>
+        <button id="tabOutbox" class="tab" onclick="showTab('outbox')">Outbox</button>
+        <button id="tabSent" class="tab" onclick="showTab('sent')">Sent</button>
+      </div>
+      <div id="list" class="list"></div>
+    </div>
+  </div>
 </div>
 
 <script>
 
 var socket = io();
+var currentTab = "inbox";
+var store = { inbox: [], outbox: [], sent: [] };
 
-socket.on("sms", function(data){
+socket.on("inbox", function(data){ store.inbox = data || []; render(); });
+socket.on("sent", function(msg){ store.sent.unshift(msg); store.outbox.unshift(msg); render(); });
+socket.on("send_error", function(msg){ store.outbox.unshift(msg); render(); });
 
-document.getElementById("sms").innerText = data;
-
-});
-
-function load(){
-fetch('/read')
-.then(r=>r.text())
-.then(t=>{
-
-sms.innerText = t
-
-})
+function showTab(tab){
+  currentTab = tab;
+  ["Inbox","Outbox","Sent"].forEach(function(name){
+    document.getElementById("tab"+name).classList.toggle("active", name.toLowerCase() === tab);
+  });
+  render();
 }
 
-function send(){
-
-var numbers = document.getElementById("numbers").value.split(",")
-var message = document.getElementById("message").value
-
-fetch('/send',{
-method:'POST',
-headers:{'Content-Type':'application/json'},
-body:JSON.stringify({numbers:numbers,message:message})
-
-})
-
+function esc(s){
+  return (s || "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
 }
 
-load()
+function render(){
+  var list = document.getElementById("list");
+  var items = store[currentTab] || [];
+  if(!items.length){
+    list.innerHTML = "<div class='item'>No messages</div>";
+    return;
+  }
+  list.innerHTML = items.map(function(item){
+    if(currentTab === "inbox"){
+      return "<div class='item'>"
+        + "<div class='meta'><span><b>"+esc(item.number)+"</b></span><span>"+esc(item.timestamp || "")+"</span></div>"
+        + "<div style='white-space:pre-wrap'>"+esc(item.message)+"</div>"
+        + "<div style='margin-top:8px'><button class='btn danger' onclick='deleteSMS("+item.modem_index+")'>Delete</button></div>"
+      + "</div>";
+    }
+    var cls = "status " + esc(item.status || "queued");
+    return "<div class='item'>"
+      + "<div class='meta'><span><b>"+esc(item.number)+"</b></span><span>"+esc(item.created_at || "")+"</span></div>"
+      + "<div style='white-space:pre-wrap'>"+esc(item.message)+"</div>"
+      + "<div style='margin-top:6px'><span class='"+cls+"'>"+esc(item.status || "queued")+"</span></div>"
+    + "</div>";
+  }).join("");
+}
+
+function loadAll(){
+  Promise.all([
+    fetch('/inbox').then(r=>r.json()),
+    fetch('/outbox').then(r=>r.json()),
+    fetch('/sent').then(r=>r.json())
+  ]).then(function(values){
+    store.inbox = values[0] || [];
+    store.outbox = values[1] || [];
+    store.sent = values[2] || [];
+    render();
+  });
+}
+
+function sendSMS(){
+  var numbers = document.getElementById("numbers").value.split(",");
+  var message = document.getElementById("message").value;
+  fetch('/send', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({numbers:numbers, message:message})
+  }).then(r=>r.json()).then(function(){
+    loadAll();
+  });
+}
+
+function deleteSMS(index){
+  fetch('/delete/' + index).then(r=>r.json()).then(function(){ loadAll(); });
+}
+
+loadAll();
 
 </script>
 

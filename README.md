@@ -10,8 +10,8 @@ SMS Gateway chuyên nghiệp sử dụng **LubanCat / Linux SBC** và **Quectel 
 * ✅ Gửi nhiều số cùng lúc
 * ✅ Nhận SMS realtime (WebSocket)
 * ✅ Xóa SMS
-* ✅ Inbox trực quan
-* ✅ Giao diện Web đẹp
+* ✅ Inbox / Outbox / Sent
+* ✅ Giao diện Web đẹp (tabs + dashboard)
 * ✅ REST API
 * ✅ Hoạt động realtime
 * ✅ Tương thích nhiều module 4G
