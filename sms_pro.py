@@ -323,11 +323,18 @@ def queue_sms():
         return jsonify({"status": "error", "error": "Invalid payload"}), 400
 
     queued = []
+    logger.debug(f"queue_sms: processing {len(numbers)} numbers")
+    
     with history_lock:
-        for number in numbers:
+        for idx, number in enumerate(numbers):
+            logger.debug(f"queue_sms: [{idx}] raw number: '{number}' (type: {type(number).__name__})")
             number = number.strip()
+            logger.debug(f"queue_sms: [{idx}] after strip: '{number}' (len: {len(number)})")
+            
             if not number:
+                logger.warning(f"queue_sms: [{idx}] skipping empty number")
                 continue
+            
             entry = {
                 "id": next_local_id(),
                 "number": number,
@@ -337,10 +344,13 @@ def queue_sms():
             }
             OUTBOX.append(entry)
             queued.append(entry)
-            logger.info(f"queue_sms: queued #{entry['id']} to {number}")
+            logger.info(f"queue_sms: ✅ queued #{entry['id']} to {number}")
+            
+            logger.debug(f"queue_sms: emitting outbox_update for #{entry['id']}")
             socketio.emit("outbox_update", entry)
 
-    logger.info(f"queue_sms: ✅ queued {len(queued)} messages")
+    logger.info(f"queue_sms: ✅ DONE - queued {len(queued)}/{len(numbers)} messages")
+    logger.debug(f"queue_sms: OUTBOX now has {len(OUTBOX)} total messages")
     return jsonify({"status": "ok", "queued": queued})
 
 
@@ -384,6 +394,11 @@ def send_all_queued():
     
     with history_lock:
         pending = [m for m in OUTBOX if m["status"] == "queued"]
+        logger.debug(f"send_all_queued: OUTBOX has {len(OUTBOX)} total, {len(pending)} queued")
+    
+    if not pending:
+        logger.warning("send_all_queued: ⚠️ No pending messages to send")
+        return jsonify({"status": "ok", "sent_count": 0})
     
     logger.info(f"send_all_queued: found {len(pending)} pending messages")
 
@@ -393,6 +408,9 @@ def send_all_queued():
         results = send_sms([entry["number"]], entry["message"])
         resp = results[0]["response"] if results else ""
         success = "+CMGS:" in resp
+        
+        logger.debug(f"send_all_queued: #{entry['id']} response: {resp[:100]}")
+        logger.info(f"send_all_queued: #{entry['id']} {'✅ SUCCESS' if success else '❌ FAILED'}")
         
         with history_lock:
             entry["status"] = "sent" if success else "failed"
@@ -406,7 +424,7 @@ def send_all_queued():
         if success:
             socketio.emit("sent_update", entry)
 
-    logger.info(f"send_all_queued: ✅ sent {len(sent_entries)}/{len(pending)} messages")
+    logger.info(f"send_all_queued: ✅ DONE - sent {len(sent_entries)}/{len(pending)} messages")
     return jsonify({"status": "ok", "sent_count": len(sent_entries)})
 
 
