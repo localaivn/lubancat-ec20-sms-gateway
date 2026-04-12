@@ -5,7 +5,7 @@ import logging
 import re
 from datetime import datetime
 
-from flask import Flask, render_template_string, request, jsonify
+from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO
 
 SERIAL_PORT = "/dev/ttyUSB3"
@@ -48,7 +48,11 @@ def _read_available(ser, timeout=1.5):
 
 
 def send_at(cmd, delay=1):
-    with serial_lock:
+    acquired = serial_lock.acquire(timeout=5)
+    if not acquired:
+        logger.error("send_at: could not acquire serial_lock (timeout)")
+        return ""
+    try:
         with _open_serial() as ser:
             time.sleep(0.2)
             ser.reset_input_buffer()
@@ -56,6 +60,11 @@ def send_at(cmd, delay=1):
             ser.flush()
             time.sleep(delay)
             return ser.read_all().decode(errors="ignore")
+    except Exception as exc:
+        logger.error("send_at error: %s", exc)
+        return ""
+    finally:
+        serial_lock.release()
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +86,12 @@ def send_sms(numbers, message):
         if not number:
             continue
         try:
-            with serial_lock:
+            acquired = serial_lock.acquire(timeout=10)
+            if not acquired:
+                logger.error("send_sms: serial_lock timeout for %s", number)
+                results.append({"number": number, "response": "lock timeout"})
+                continue
+            try:
                 with _open_serial() as ser:
                     time.sleep(0.2)
                     ser.reset_input_buffer()
@@ -91,6 +105,8 @@ def send_sms(numbers, message):
                     ser.flush()
                     time.sleep(3)
                     resp = ser.read_all().decode(errors="ignore")
+            finally:
+                serial_lock.release()
             results.append({"number": number, "response": resp})
         except Exception as exc:
             logger.error("send_sms error for %s: %s", number, exc)
@@ -130,7 +146,11 @@ def parse_inbox(raw):
 
 def read_sms():
     """Read all SMS from modem and return parsed list."""
-    with serial_lock:
+    acquired = serial_lock.acquire(timeout=5)
+    if not acquired:
+        logger.error("read_sms: could not acquire serial_lock (timeout)")
+        return []
+    try:
         with _open_serial() as ser:
             time.sleep(0.2)
             ser.reset_input_buffer()
@@ -140,6 +160,8 @@ def read_sms():
             ser.write(b'AT+CMGL="ALL"\r')
             ser.flush()
             raw = _read_available(ser, timeout=2.5)
+    finally:
+        serial_lock.release()
     return parse_inbox(raw)
 
 
@@ -167,6 +189,7 @@ def refresh_inbox():
 def inbox_poller():
     """Periodically poll inbox every INBOX_POLL_INTERVAL seconds."""
     logger.info("Inbox poller started (interval=%ds)", INBOX_POLL_INTERVAL)
+    time.sleep(2)  # let Flask finish starting up first
     while True:
         refresh_inbox()
         time.sleep(INBOX_POLL_INTERVAL)
@@ -175,18 +198,25 @@ def inbox_poller():
 def sms_listener():
     """Listen for +CMTI unsolicited notifications for instant inbox updates."""
     logger.info("SMS listener started on %s", SERIAL_PORT)
-    send_at("AT+CNMI=2,1,0,0,0", 1)
+    time.sleep(2)
+    try:
+        send_at("AT+CNMI=2,1,0,0,0", 1)
+    except Exception as exc:
+        logger.warning("sms_listener: CNMI setup failed: %s", exc)
+
     while True:
         try:
+            # Open serial, read one line, then immediately close — never hold lock while blocking
             with serial_lock:
                 with _open_serial() as ser:
+                    ser.timeout = 2  # short timeout so lock is released quickly
                     line = ser.readline().decode(errors="ignore")
             if "+CMTI:" in line:
                 logger.info("New SMS notification: %s", line.strip())
                 refresh_inbox()
         except Exception as exc:
             logger.warning("sms_listener error: %s", exc)
-            time.sleep(1)
+            time.sleep(2)
 
 
 # ---------------------------------------------------------------------------
@@ -195,7 +225,7 @@ def sms_listener():
 
 @app.route("/")
 def index():
-    return render_template_string(HTML)
+    return render_template("index.html")
 
 
 @app.route("/inbox")
@@ -306,242 +336,10 @@ def delete(index):
 
 
 # ---------------------------------------------------------------------------
-# HTML frontend
+# Start background threads + run
 # ---------------------------------------------------------------------------
-
-HTML = """
-<!doctype html>
-<html>
-<head>
-<title>LubanCat SMS Pro+</title>
-<script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
-<style>
-* { box-sizing: border-box; }
-body { margin:0; font-family: Inter, Arial, sans-serif; background:#0f172a; color:#0f172a; }
-.container { max-width:1200px; margin:24px auto; padding:0 16px; }
-.hero { background:linear-gradient(135deg,#2563eb,#9333ea); color:#fff; padding:20px; border-radius:16px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; }
-.hero-right { font-size:13px; opacity:.85; }
-.layout { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
-.card { background:#fff; border-radius:14px; padding:16px; box-shadow:0 10px 20px rgba(2,6,23,.15); }
-.tabs { display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
-.tab { border:none; border-radius:999px; padding:8px 14px; background:#e2e8f0; cursor:pointer; font-weight:600; font-size:13px; }
-.tab.active { background:#1d4ed8; color:#fff; }
-input, textarea { width:100%; border:1px solid #cbd5e1; border-radius:8px; padding:10px; margin-top:6px; font-size:14px; }
-textarea { min-height:110px; resize:vertical; }
-.btn { border:none; border-radius:8px; padding:9px 14px; background:#2563eb; color:#fff; font-weight:700; cursor:pointer; font-size:13px; }
-.btn.success { background:#16a34a; }
-.btn.danger { background:#dc2626; }
-.btn.warn { background:#d97706; }
-.btn-row { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
-.list { max-height:420px; overflow:auto; display:grid; gap:8px; }
-.item { border:1px solid #e2e8f0; border-radius:10px; padding:10px; background:#f8fafc; }
-.meta { font-size:12px; color:#475569; margin-bottom:6px; display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap; }
-.status { font-size:12px; font-weight:700; padding:2px 8px; border-radius:999px; }
-.status.sent { color:#166534; background:#dcfce7; }
-.status.failed { color:#991b1b; background:#fee2e2; }
-.status.queued { color:#1e3a8a; background:#dbeafe; }
-.badge { display:inline-block; background:#ef4444; color:#fff; border-radius:999px; font-size:11px; font-weight:700; padding:1px 6px; margin-left:4px; }
-.toast { position:fixed; bottom:20px; right:20px; background:#1e293b; color:#fff; padding:12px 18px; border-radius:10px; font-size:14px; opacity:0; transition:opacity .3s; pointer-events:none; z-index:999; }
-.toast.show { opacity:1; }
-@media (max-width:900px) { .layout { grid-template-columns:1fr; } }
-</style>
-</head>
-<body>
-<div class="container">
-  <div class="hero">
-    <div>
-      <h2 style="margin:0;">📡 LubanCat SMS Pro+</h2>
-      <div style="font-size:13px;opacity:.85;">Realtime Inbox / Outbox / Sent with modem control</div>
-    </div>
-    <div class="hero-right" id="pollStatus">⏳ Loading...</div>
-  </div>
-
-  <div class="layout">
-    <!-- Compose -->
-    <div class="card">
-      <h3 style="margin-top:0;">✉️ Compose SMS</h3>
-      <label>Numbers <span style="color:#94a3b8;font-size:12px;">(comma separated)</span></label>
-      <input id="numbers" placeholder="0901111111, 0902222222">
-      <label>Message</label>
-      <textarea id="message" placeholder="Type your SMS..."></textarea>
-      <div class="btn-row">
-        <button class="btn" onclick="queueSMS()">📥 Add to Outbox</button>
-        <button class="btn success" onclick="sendAllQueued()">🚀 Send All Queued</button>
-      </div>
-    </div>
-
-    <!-- Message lists -->
-    <div class="card">
-      <div class="tabs">
-        <button id="tabInbox" class="tab active" onclick="showTab('inbox')">
-          📨 Inbox <span id="badgeInbox" class="badge" style="display:none">0</span>
-        </button>
-        <button id="tabOutbox" class="tab" onclick="showTab('outbox')">
-          📤 Outbox <span id="badgeOutbox" class="badge" style="display:none">0</span>
-        </button>
-        <button id="tabSent" class="tab" onclick="showTab('sent')">✅ Sent</button>
-      </div>
-      <div id="list" class="list"></div>
-    </div>
-  </div>
-</div>
-
-<div class="toast" id="toast"></div>
-
-<script>
-var socket = io();
-var currentTab = "inbox";
-var store = { inbox: [], outbox: [], sent: [] };
-
-// SocketIO events
-socket.on("inbox", function(data){
-  store.inbox = data || [];
-  updateBadge("Inbox", store.inbox.length);
-  document.getElementById("pollStatus").textContent = "🟢 Last sync: " + new Date().toLocaleTimeString();
-  if(currentTab === "inbox") render();
-});
-
-socket.on("outbox_update", function(entry){
-  var idx = store.outbox.findIndex(function(m){ return m.id === entry.id; });
-  if(idx >= 0) store.outbox[idx] = entry;
-  else store.outbox.unshift(entry);
-  var queued = store.outbox.filter(function(m){ return m.status === "queued"; }).length;
-  updateBadge("Outbox", queued);
-  if(currentTab === "outbox") render();
-});
-
-socket.on("sent_update", function(entry){
-  var idx = store.sent.findIndex(function(m){ return m.id === entry.id; });
-  if(idx < 0) store.sent.unshift(entry);
-  if(currentTab === "sent") render();
-});
-
-function updateBadge(name, count){
-  var el = document.getElementById("badge" + name);
-  if(count > 0){ el.textContent = count; el.style.display = ""; }
-  else { el.style.display = "none"; }
-}
-
-function showTab(tab){
-  currentTab = tab;
-  ["Inbox","Outbox","Sent"].forEach(function(name){
-    document.getElementById("tab"+name).classList.toggle("active", name.toLowerCase() === tab);
-  });
-  render();
-}
-
-function esc(s){
-  return (s || "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
-}
-
-function render(){
-  var list = document.getElementById("list");
-  var items = store[currentTab] || [];
-  if(!items.length){
-    list.innerHTML = "<div class='item' style='color:#94a3b8;text-align:center;padding:24px;'>No messages</div>";
-    return;
-  }
-  list.innerHTML = items.map(function(item){
-    if(currentTab === "inbox"){
-      return "<div class='item'>"
-        + "<div class='meta'><span><b>"+esc(item.number)+"</b></span><span>"+esc(item.timestamp || "")+"</span></div>"
-        + "<div style='white-space:pre-wrap'>"+esc(item.message)+"</div>"
-        + "<div style='margin-top:8px'><button class='btn danger' onclick='deleteSMS("+item.modem_index+")'>🗑 Delete</button></div>"
-      + "</div>";
-    }
-    var cls = "status " + esc(item.status || "queued");
-    var actions = "";
-    if(item.status === "queued"){
-      actions = "<button class='btn success' style='margin-top:8px;' onclick='sendOne("+item.id+")'>🚀 Send</button>";
-    }
-    return "<div class='item'>"
-      + "<div class='meta'><span><b>"+esc(item.number)+"</b></span><span>"+esc(item.created_at || "")+"</span></div>"
-      + "<div style='white-space:pre-wrap'>"+esc(item.message)+"</div>"
-      + "<div style='margin-top:6px;display:flex;align-items:center;gap:8px;'><span class='"+cls+"'>"+esc(item.status || "queued")+"</span>"
-      + (item.sent_at ? "<span style='font-size:11px;color:#64748b;'>sent "+esc(item.sent_at)+"</span>" : "")
-      + "</div>"
-      + actions
-    + "</div>";
-  }).join("");
-}
-
-function toast(msg){
-  var el = document.getElementById("toast");
-  el.textContent = msg;
-  el.classList.add("show");
-  setTimeout(function(){ el.classList.remove("show"); }, 3000);
-}
-
-function loadAll(){
-  Promise.all([
-    fetch('/inbox').then(function(r){ return r.json(); }),
-    fetch('/outbox').then(function(r){ return r.json(); }),
-    fetch('/sent').then(function(r){ return r.json(); })
-  ]).then(function(values){
-    store.inbox = values[0] || [];
-    store.outbox = values[1] || [];
-    store.sent = values[2] || [];
-    var queued = store.outbox.filter(function(m){ return m.status === "queued"; }).length;
-    updateBadge("Inbox", store.inbox.length);
-    updateBadge("Outbox", queued);
-    document.getElementById("pollStatus").textContent = "🟢 Last sync: " + new Date().toLocaleTimeString();
-    render();
-  });
-}
-
-function queueSMS(){
-  var numbers = document.getElementById("numbers").value.split(",");
-  var message = document.getElementById("message").value.trim();
-  if(!message){ toast("⚠️ Message is empty"); return; }
-  fetch('/queue', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({numbers:numbers, message:message})
-  }).then(function(r){ return r.json(); }).then(function(data){
-    if(data.status === "ok"){
-      toast("📥 Added " + data.queued.length + " message(s) to outbox");
-      document.getElementById("message").value = "";
-      showTab("outbox");
-    }
-  });
-}
-
-function sendOne(id){
-  fetch('/send/' + id, { method:'POST' })
-    .then(function(r){ return r.json(); })
-    .then(function(data){
-      if(data.entry && data.entry.status === "sent") toast("✅ Sent to " + data.entry.number);
-      else toast("❌ Failed to send");
-      loadAll();
-    });
-}
-
-function sendAllQueued(){
-  fetch('/send_all', { method:'POST' })
-    .then(function(r){ return r.json(); })
-    .then(function(data){
-      toast("✅ Sent " + data.sent_count + " message(s)");
-      loadAll();
-    });
-}
-
-function deleteSMS(index){
-  if(!confirm("Delete this SMS from modem?")) return;
-  fetch('/delete/' + index).then(function(r){ return r.json(); }).then(function(){ loadAll(); });
-}
-
-loadAll();
-</script>
-</body>
-</html>
-"""
-
-# ---------------------------------------------------------------------------
-# Start background threads
-# ---------------------------------------------------------------------------
-
-threading.Thread(target=inbox_poller, daemon=True).start()
-threading.Thread(target=sms_listener, daemon=True).start()
 
 if __name__ == "__main__":
+    threading.Thread(target=inbox_poller, daemon=True).start()
+    threading.Thread(target=sms_listener, daemon=True).start()
     socketio.run(app, host="0.0.0.0", port=5000, allow_unsafe_werkzeug=True)

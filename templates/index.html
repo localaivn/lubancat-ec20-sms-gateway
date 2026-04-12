@@ -1,0 +1,52 @@
+<!doctype html>
+<html>
+<head>
+<title>LubanCat SMS Pro+</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+</head>
+<body>
+<div class="container">
+  <div class="hero">
+    <div>
+      <h2 style="margin:0;">📡 LubanCat SMS Pro+</h2>
+      <div style="font-size:13px;opacity:.85;">Realtime Inbox / Outbox / Sent with modem control</div>
+    </div>
+    <div class="hero-right" id="pollStatus">⏳ Loading...</div>
+  </div>
+
+  <div class="layout">
+    <!-- Compose -->
+    <div class="card">
+      <h3 style="margin-top:0;">✉️ Compose SMS</h3>
+      <label>Numbers <span style="color:#94a3b8;font-size:12px;">(comma separated)</span></label>
+      <input id="numbers" placeholder="0901111111, 0902222222">
+      <label>Message</label>
+      <textarea id="message" placeholder="Type your SMS..."></textarea>
+      <div class="btn-row">
+        <button class="btn" onclick="queueSMS()">📥 Add to Outbox</button>
+        <button class="btn success" onclick="sendAllQueued()">🚀 Send All Queued</button>
+      </div>
+    </div>
+
+    <!-- Message lists -->
+    <div class="card">
+      <div class="tabs">
+        <button id="tabInbox" class="tab active" onclick="showTab('inbox')">
+          📨 Inbox <span id="badgeInbox" class="badge" style="display:none">0</span>
+        </button>
+        <button id="tabOutbox" class="tab" onclick="showTab('outbox')">
+          📤 Outbox <span id="badgeOutbox" class="badge" style="display:none">0</span>
+        </button>
+        <button id="tabSent" class="tab" onclick="showTab('sent')">✅ Sent</button>
+      </div>
+      <div id="list" class="list"></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
