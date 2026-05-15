@@ -1,0 +1,1103 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EC25 Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<style>
+:root {
+  --bg:       #0a0c0f;
+  --surface:  #111418;
+  --border:   #1e2530;
+  --border2:  #2a3340;
+  --accent:   #00d4aa;
+  --accent2:  #0090ff;
+  --warn:     #ff6b35;
+  --text:     #c8d6e5;
+  --muted:    #4a5568;
+  --green:    #22c55e;
+  --red:      #ef4444;
+  --font-mono: 'JetBrains Mono', monospace;
+  --font-ui:   'Syne', sans-serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Scanline overlay */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px);
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* ─── Header ─── */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  position: sticky; top: 0; z-index: 100;
+}
+
+.logo {
+  font-family: var(--font-ui);
+  font-weight: 800;
+  font-size: 18px;
+  letter-spacing: -0.5px;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logo .badge {
+  background: var(--accent);
+  color: #000;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 3px;
+  letter-spacing: 1px;
+}
+
+.header-status {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.status-pill {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex-shrink: 0;
+}
+.dot.online  { background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 2s infinite; }
+.dot.offline { background: var(--red); }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; } 50% { opacity: 0.4; }
+}
+
+/* ─── Signal bar ─── */
+.signal-bars {
+  display: flex; align-items: flex-end; gap: 2px; height: 14px;
+}
+.signal-bars span {
+  width: 4px;
+  background: var(--border2);
+  border-radius: 1px;
+  transition: background 0.4s;
+}
+.signal-bars span:nth-child(1) { height: 4px; }
+.signal-bars span:nth-child(2) { height: 7px; }
+.signal-bars span:nth-child(3) { height: 10px; }
+.signal-bars span:nth-child(4) { height: 14px; }
+.signal-bars.s1 span:nth-child(1) { background: var(--warn); }
+.signal-bars.s2 span:nth-child(1), .signal-bars.s2 span:nth-child(2) { background: #f59e0b; }
+.signal-bars.s3 span:nth-child(1), .signal-bars.s3 span:nth-child(2), .signal-bars.s3 span:nth-child(3) { background: var(--accent); }
+.signal-bars.s4 span { background: var(--green); }
+
+/* ─── Layout ─── */
+.layout {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  grid-template-rows: auto 1fr;
+  gap: 0;
+  height: calc(100vh - 53px);
+}
+
+/* ─── Sidebar ─── */
+.sidebar {
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ─── Tabs ─── */
+.tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.tab {
+  flex: 1;
+  padding: 12px;
+  text-align: center;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+  text-transform: uppercase;
+}
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* ─── Panel ─── */
+.panel { display: none; flex: 1; flex-direction: column; overflow: hidden; }
+.panel.active { display: flex; }
+
+/* ─── SMS List ─── */
+.sms-toolbar {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  padding: 7px 14px;
+  border-radius: 4px;
+  border: 1px solid var(--border2);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex; align-items: center; gap: 6px;
+  white-space: nowrap;
+}
+.btn:hover { border-color: var(--accent); color: var(--accent); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #000; font-weight: 700; }
+.btn.primary:hover { background: #00f5c4; }
+.btn.danger { border-color: var(--red); color: var(--red); }
+.btn.danger:hover { background: rgba(239,68,68,0.1); }
+
+.search-input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 7px 10px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.search-input:focus { border-color: var(--accent); }
+.search-input::placeholder { color: var(--muted); }
+
+.sms-list {
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border2) transparent;
+}
+
+.sms-item {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.15s;
+  position: relative;
+}
+.sms-item:hover { background: rgba(255,255,255,0.02); }
+.sms-item.selected { background: rgba(0,212,170,0.06); border-left: 2px solid var(--accent); }
+.sms-item.unread .sms-from { color: #fff; }
+.sms-item.unread::after {
+  content: '';
+  position: absolute;
+  top: 14px; right: 14px;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--accent2);
+}
+
+.sms-from {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text);
+  margin-bottom: 3px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sms-from .idx { color: var(--muted); font-weight: 400; font-size: 10px; }
+
+.sms-preview {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sms-time { font-size: 10px; color: var(--muted); margin-top: 3px; }
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--muted);
+  gap: 8px;
+}
+.empty-icon { font-size: 32px; opacity: 0.3; }
+
+/* ─── SMS Detail / Compose ─── */
+.main-area {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.detail-header {
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.detail-from {
+  flex: 1;
+  font-family: var(--font-ui);
+  font-size: 16px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.detail-body {
+  flex: 1;
+  padding: 24px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.msg-bubble {
+  max-width: 80%;
+  padding: 10px 14px;
+  border-radius: 8px;
+  line-height: 1.6;
+  font-size: 13px;
+}
+.msg-bubble.incoming {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  align-self: flex-start;
+}
+.msg-bubble.outgoing {
+  background: rgba(0,212,170,0.12);
+  border: 1px solid rgba(0,212,170,0.3);
+  color: #fff;
+  align-self: flex-end;
+}
+
+.msg-time { font-size: 10px; color: var(--muted); margin-top: 3px; }
+
+/* ─── Compose ─── */
+.compose-bar {
+  padding: 16px 24px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.compose-number {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.compose-label {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  min-width: 30px;
+}
+
+.compose-input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px 12px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.compose-input:focus { border-color: var(--accent); }
+.compose-input::placeholder { color: var(--muted); }
+
+textarea.compose-input {
+  resize: none;
+  height: 68px;
+  line-height: 1.5;
+}
+
+.char-count { font-size: 10px; color: var(--muted); text-align: right; }
+
+.compose-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* ─── GPS Panel ─── */
+.gps-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
+.gps-info-bar {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.gps-coords {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.coord-box {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px 10px;
+}
+.coord-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 3px; }
+.coord-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.coord-value.no-fix { color: var(--muted); font-size: 11px; }
+
+.gps-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.gps-meta span { display: flex; align-items: center; gap: 4px; }
+
+.gps-controls {
+  display: flex;
+  gap: 8px;
+  padding: 0 4px;
+}
+
+#map {
+  flex: 1;
+  min-height: 200px;
+  filter: brightness(0.85) contrast(1.1) saturate(0.8);
+}
+
+/* Custom map dark tiles */
+
+/* ─── Status panel in sidebar ─── */
+.status-panel {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.stat-key { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+.stat-val { color: var(--text); font-size: 12px; font-weight: 600; }
+.stat-val.ok { color: var(--green); }
+.stat-val.err { color: var(--red); }
+.stat-val.accent { color: var(--accent); }
+
+/* ─── Toast ─── */
+#toast-container {
+  position: fixed;
+  bottom: 24px; right: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 9000;
+}
+
+.toast {
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  padding: 12px 16px;
+  font-size: 12px;
+  min-width: 220px;
+  max-width: 320px;
+  animation: slideIn 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.toast.success { border-left: 3px solid var(--green); }
+.toast.error   { border-left: 3px solid var(--red); }
+.toast.info    { border-left: 3px solid var(--accent2); }
+
+@keyframes slideIn {
+  from { transform: translateX(20px); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+/* ─── Loading ─── */
+.loading {
+  display: inline-block;
+  width: 10px; height: 10px;
+  border: 1.5px solid var(--border2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ─── New SMS badge animation ─── */
+@keyframes flashBorder {
+  0%, 100% { border-color: var(--border); }
+  50% { border-color: var(--accent2); box-shadow: 0 0 12px rgba(0,144,255,0.3); }
+}
+.new-sms-flash { animation: flashBorder 1s ease 3; }
+
+/* ─── Scrollbar ─── */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+/* ─── GPS No Fix ─── */
+.no-fix-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(10,12,15,0.85);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  z-index: 1000;
+  color: var(--muted);
+}
+.no-fix-overlay .spinner { width: 24px; height: 24px; border-width: 2px; }
+
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header class="header">
+  <div class="logo">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--accent)">
+      <rect x="2" y="6" width="20" height="12" rx="2"/>
+      <path d="M8 6V4M16 6V4M2 10h20"/>
+      <circle cx="7" cy="15" r="1" fill="currentColor"/>
+      <circle cx="12" cy="15" r="1" fill="currentColor"/>
+    </svg>
+    EC25 Dashboard
+    <span class="badge">LTE</span>
+  </div>
+
+  <div class="header-status">
+    <div class="status-pill">
+      <div class="signal-bars" id="signalBars">
+        <span></span><span></span><span></span><span></span>
+      </div>
+      <span id="operatorName">--</span>
+    </div>
+    <div class="status-pill">
+      <div class="dot" id="connDot"></div>
+      <span id="connLabel">Đang kết nối...</span>
+    </div>
+    <div class="status-pill" id="gpsStatusPill" style="display:none">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2">
+        <circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9" stroke-dasharray="4 2"/>
+      </svg>
+      <span id="gpsStatusLabel" style="color:var(--accent)">GPS Active</span>
+    </div>
+  </div>
+</header>
+
+<!-- Layout -->
+<div class="layout">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('sms')" id="tab-sms">📨 SMS</div>
+      <div class="tab" onclick="switchTab('gps')" id="tab-gps">🛰 GPS</div>
+      <div class="tab" onclick="switchTab('status')" id="tab-status">📡 Modem</div>
+    </div>
+
+    <!-- SMS Panel -->
+    <div class="panel active" id="panel-sms">
+      <div class="sms-toolbar">
+        <input type="text" class="search-input" placeholder="Tìm tin nhắn..." id="searchInput" oninput="filterSMS()">
+        <button class="btn" onclick="loadSMS()" title="Làm mới">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+            <path d="M3 3v5h5"/>
+          </svg>
+        </button>
+      </div>
+      <div class="sms-list" id="smsList">
+        <div class="empty-state">
+          <div class="empty-icon">📭</div>
+          <div>Đang tải tin nhắn...</div>
+        </div>
+      </div>
+      <button class="btn primary" onclick="showCompose()" style="margin:12px;border-radius:4px;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M12 5v14M5 12h14"/>
+        </svg>
+        Soạn tin nhắn mới
+      </button>
+    </div>
+
+    <!-- GPS Panel -->
+    <div class="panel" id="panel-gps">
+      <div class="gps-info-bar">
+        <div class="gps-controls">
+          <button class="btn primary" onclick="startGPS()" id="btnStartGPS">▶ Bật GPS</button>
+          <button class="btn danger" onclick="stopGPS()" id="btnStopGPS" style="display:none">■ Tắt</button>
+          <button class="btn" onclick="getOnceGPS()">📍 Lấy vị trí</button>
+        </div>
+        <div class="gps-coords">
+          <div class="coord-box">
+            <div class="coord-label">Latitude</div>
+            <div class="coord-value no-fix" id="gpsLat">-- Chưa có fix</div>
+          </div>
+          <div class="coord-box">
+            <div class="coord-label">Longitude</div>
+            <div class="coord-value no-fix" id="gpsLon">--</div>
+          </div>
+          <div class="coord-box">
+            <div class="coord-label">Altitude</div>
+            <div class="coord-value no-fix" id="gpsAlt">--</div>
+          </div>
+          <div class="coord-box">
+            <div class="coord-label">Tốc độ</div>
+            <div class="coord-value no-fix" id="gpsSpeed">--</div>
+          </div>
+        </div>
+        <div class="gps-meta">
+          <span>🛰 Vệ tinh: <b id="gpsSats">--</b></span>
+          <span>⏱ <span id="gpsTime">--</span></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status Panel -->
+    <div class="panel" id="panel-status">
+      <div class="status-panel" id="statusPanel">
+        <div class="stat-row">
+          <span class="stat-key">Trạng thái</span>
+          <span class="stat-val" id="sModem">--</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-key">Nhà mạng</span>
+          <span class="stat-val accent" id="sOperator">--</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-key">Kết nối mạng</span>
+          <span class="stat-val" id="sNetwork">--</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-key">Tín hiệu</span>
+          <span class="stat-val" id="sSignal">--</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-key">IMSI</span>
+          <span class="stat-val" id="sIMSI" style="font-size:11px">--</span>
+        </div>
+        <button class="btn" onclick="refreshStatus()" style="margin-top:4px">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>
+          </svg>
+          Làm mới
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main content -->
+  <main class="main-area" id="mainArea">
+
+    <!-- SMS Detail view -->
+    <div id="viewDetail" style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
+      <div class="detail-header">
+        <div class="detail-from" id="detailFrom">Chọn tin nhắn để xem</div>
+        <button class="btn danger" id="btnDelete" onclick="deleteSelected()" style="display:none">🗑 Xoá</button>
+      </div>
+      <div class="detail-body" id="detailBody">
+        <div class="empty-state" style="height:100%">
+          <div class="empty-icon">💬</div>
+          <div style="color:var(--muted)">Chọn một tin nhắn để xem nội dung</div>
+          <div style="color:var(--muted);font-size:11px">hoặc soạn tin nhắn mới</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Compose view -->
+    <div id="viewCompose" style="display:none;flex-direction:column;flex:1;overflow:hidden;">
+      <div class="detail-header">
+        <div class="detail-from">Soạn tin nhắn mới</div>
+        <button class="btn" onclick="hideCompose()">✕ Huỷ</button>
+      </div>
+      <div style="flex:1;padding:24px;overflow-y:auto;">
+        <div style="max-width:500px;display:flex;flex-direction:column;gap:12px;">
+          <div style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:1px;">Số điện thoại người nhận</div>
+          <input type="tel" class="compose-input" id="composeNumber" placeholder="+84901234567" style="width:100%">
+          <div style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-top:8px;">Nội dung</div>
+          <textarea class="compose-input" id="composeText" placeholder="Nhập nội dung tin nhắn..." oninput="updateCharCount()" style="width:100%;height:120px"></textarea>
+          <div class="compose-actions">
+            <span class="char-count" id="charCount">0 / 160 ký tự</span>
+            <button class="btn primary" onclick="sendSMS()" id="btnSend">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+              </svg>
+              Gửi SMS
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- GPS Map view (shown when GPS tab active) -->
+    <div id="viewGPS" style="display:none;flex:1;flex-direction:column;overflow:hidden;position:relative;">
+      <div id="map" style="flex:1"></div>
+      <div class="no-fix-overlay" id="noFixOverlay">
+        <div class="loading spinner"></div>
+        <div>Đang chờ tín hiệu GPS...</div>
+        <div style="font-size:11px">Đảm bảo anten GPS được kết nối và modem ở ngoài trời</div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<script>
+// ─── State ───────────────────────────────────────────────
+const state = {
+  smsList: [],
+  selectedIdx: null,
+  gpsActive: false,
+  currentTab: 'sms',
+  sentMessages: {},   // number -> [messages]
+  mapInitialized: false,
+  leafletMap: null,
+  marker: null,
+  circle: null
+};
+
+// ─── Socket ──────────────────────────────────────────────
+const socket = io();
+
+socket.on('connect', () => {
+  socket.emit('request_sms');
+  socket.emit('request_status');
+});
+
+socket.on('status_update', updateStatusUI);
+socket.on('sms_list', msgs => { state.smsList = msgs; renderSMSList(); });
+socket.on('new_sms', msg => {
+  toast(`📩 SMS từ ${msg.from}`, 'info');
+  const exists = state.smsList.find(m => m.index === msg.index);
+  if (!exists) { state.smsList.unshift(msg); renderSMSList(); }
+});
+socket.on('sent_sms', r => {
+  if (r.success) {
+    if (!state.sentMessages[r.number]) state.sentMessages[r.number] = [];
+    state.sentMessages[r.number].push({ body: r.message, time: r.timestamp });
+  }
+});
+socket.on('gps_update', updateGPS);
+
+// ─── Status ──────────────────────────────────────────────
+function updateStatusUI(s) {
+  const dot   = document.getElementById('connDot');
+  const label = document.getElementById('connLabel');
+  const bars  = document.getElementById('signalBars');
+  const op    = document.getElementById('operatorName');
+
+  if (s.connected) {
+    dot.className = 'dot online';
+    label.textContent = 'Đã kết nối';
+  } else {
+    dot.className = 'dot offline';
+    label.textContent = 'Mất kết nối';
+  }
+
+  if (s.operator) op.textContent = s.operator;
+
+  if (s.signal_pct !== undefined) {
+    const lvl = s.signal_pct > 75 ? 's4' : s.signal_pct > 50 ? 's3' : s.signal_pct > 25 ? 's2' : 's1';
+    bars.className = 'signal-bars ' + lvl;
+  }
+
+  document.getElementById('sModem').textContent   = s.connected ? 'Online' : 'Offline';
+  document.getElementById('sModem').className     = 'stat-val ' + (s.connected ? 'ok' : 'err');
+  document.getElementById('sOperator').textContent = s.operator || '--';
+  document.getElementById('sNetwork').textContent  = s.network  || '--';
+  document.getElementById('sSignal').textContent   = s.signal_dbm ? `${s.signal_dbm} dBm (${s.signal_pct}%)` : '--';
+  document.getElementById('sIMSI').textContent     = s.imsi || '--';
+}
+
+function refreshStatus() {
+  fetch('/api/status').then(r => r.json()).then(updateStatusUI);
+}
+
+// ─── Tabs ────────────────────────────────────────────────
+function switchTab(tab) {
+  state.currentTab = tab;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('tab-' + tab).classList.add('active');
+  document.getElementById('panel-' + tab).classList.add('active');
+
+  const viewDetail  = document.getElementById('viewDetail');
+  const viewCompose = document.getElementById('viewCompose');
+  const viewGPS     = document.getElementById('viewGPS');
+
+  if (tab === 'gps') {
+    viewDetail.style.display  = 'none';
+    viewCompose.style.display = 'none';
+    viewGPS.style.display     = 'flex';
+    if (!state.mapInitialized) initMap();
+  } else if (tab === 'sms' || tab === 'status') {
+    viewGPS.style.display = 'none';
+    if (state.composeVisible) {
+      viewCompose.style.display = 'flex';
+      viewDetail.style.display  = 'none';
+    } else {
+      viewDetail.style.display  = 'flex';
+      viewCompose.style.display = 'none';
+    }
+  }
+}
+
+// ─── SMS ─────────────────────────────────────────────────
+function loadSMS() {
+  fetch('/api/sms/list').then(r => r.json()).then(msgs => {
+    state.smsList = msgs;
+    renderSMSList();
+    toast('Đã làm mới danh sách SMS', 'success');
+  });
+}
+
+function filterSMS() {
+  const q = document.getElementById('searchInput').value.toLowerCase();
+  const items = document.querySelectorAll('.sms-item');
+  items.forEach(el => {
+    const text = el.textContent.toLowerCase();
+    el.style.display = text.includes(q) ? '' : 'none';
+  });
+}
+
+function renderSMSList() {
+  const list = document.getElementById('smsList');
+  if (!state.smsList.length) {
+    list.innerHTML = '<div class="empty-state"><div class="empty-icon">📭</div><div>Không có tin nhắn</div></div>';
+    return;
+  }
+
+  list.innerHTML = state.smsList.map(m => `
+    <div class="sms-item ${m.unread ? 'unread' : ''} ${state.selectedIdx === m.index ? 'selected' : ''}"
+         id="sms-item-${m.index}" onclick="selectSMS('${m.index}')">
+      <div class="sms-from">
+        ${m.from || '(Ẩn danh)'}
+        <span class="idx">#${m.index}</span>
+      </div>
+      <div class="sms-preview">${escHtml(m.body)}</div>
+      <div class="sms-time">${m.timestamp || ''}</div>
+    </div>
+  `).join('');
+}
+
+function selectSMS(idx) {
+  state.selectedIdx = idx;
+  state.composeVisible = false;
+
+  document.querySelectorAll('.sms-item').forEach(el => el.classList.remove('selected'));
+  const el = document.getElementById('sms-item-' + idx);
+  if (el) el.classList.add('selected');
+
+  const msg = state.smsList.find(m => m.index === idx);
+  if (!msg) return;
+
+  document.getElementById('viewCompose').style.display = 'none';
+  document.getElementById('viewDetail').style.display  = 'flex';
+  document.getElementById('detailFrom').textContent    = msg.from || '(Ẩn danh)';
+  document.getElementById('btnDelete').style.display   = 'inline-flex';
+
+  const body = document.getElementById('detailBody');
+  const sent = state.sentMessages[msg.from] || [];
+
+  body.innerHTML = `
+    <div class="msg-bubble incoming">
+      ${escHtml(msg.body)}
+      <div class="msg-time">${msg.timestamp || ''}</div>
+    </div>
+    ${sent.map(s => `
+      <div class="msg-bubble outgoing">
+        ${escHtml(s.body)}
+        <div class="msg-time">${s.time}</div>
+      </div>
+    `).join('')}
+  `;
+  body.scrollTop = body.scrollHeight;
+
+  // Pre-fill reply number
+  document.getElementById('composeNumber').value = msg.from || '';
+}
+
+function deleteSelected() {
+  if (!state.selectedIdx) return;
+  if (!confirm('Xoá tin nhắn này?')) return;
+  fetch(`/api/sms/delete/${state.selectedIdx}`, { method: 'DELETE' })
+    .then(r => r.json())
+    .then(r => {
+      if (r.success) {
+        state.smsList = state.smsList.filter(m => m.index !== state.selectedIdx);
+        state.selectedIdx = null;
+        renderSMSList();
+        document.getElementById('detailFrom').textContent = 'Chọn tin nhắn để xem';
+        document.getElementById('detailBody').innerHTML = '';
+        document.getElementById('btnDelete').style.display = 'none';
+        toast('Đã xoá tin nhắn', 'success');
+      }
+    });
+}
+
+// ─── Compose ─────────────────────────────────────────────
+function showCompose() {
+  state.composeVisible = true;
+  document.getElementById('viewDetail').style.display  = 'none';
+  document.getElementById('viewCompose').style.display = 'flex';
+  document.getElementById('composeText').focus();
+}
+
+function hideCompose() {
+  state.composeVisible = false;
+  document.getElementById('viewCompose').style.display = 'none';
+  document.getElementById('viewDetail').style.display  = 'flex';
+}
+
+function updateCharCount() {
+  const txt = document.getElementById('composeText').value;
+  document.getElementById('charCount').textContent = `${txt.length} / 160 ký tự`;
+}
+
+function sendSMS() {
+  const number  = document.getElementById('composeNumber').value.trim();
+  const message = document.getElementById('composeText').value.trim();
+
+  if (!number)  { toast('Nhập số điện thoại', 'error'); return; }
+  if (!message) { toast('Nhập nội dung tin nhắn', 'error'); return; }
+
+  const btn = document.getElementById('btnSend');
+  btn.disabled = true;
+  btn.innerHTML = '<div class="loading"></div> Đang gửi...';
+
+  fetch('/api/sms/send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ number, message })
+  })
+  .then(r => r.json())
+  .then(r => {
+    if (r.success) {
+      toast(`✅ Đã gửi tới ${number}`, 'success');
+      if (!state.sentMessages[number]) state.sentMessages[number] = [];
+      state.sentMessages[number].push({ body: message, time: new Date().toLocaleString('vi-VN') });
+      document.getElementById('composeText').value = '';
+      updateCharCount();
+      hideCompose();
+    } else {
+      toast(`❌ Lỗi: ${r.error}`, 'error');
+    }
+  })
+  .catch(() => toast('❌ Không kết nối được server', 'error'))
+  .finally(() => {
+    btn.disabled = false;
+    btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg> Gửi SMS`;
+  });
+}
+
+// ─── GPS ─────────────────────────────────────────────────
+function initMap() {
+  state.mapInitialized = true;
+  const map = L.map('map', { zoomControl: true }).setView([21.0278, 105.8342], 13);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '© OpenStreetMap © CARTO',
+    maxZoom: 19
+  }).addTo(map);
+
+  const icon = L.divIcon({
+    className: '',
+    html: `<div style="width:16px;height:16px;background:var(--accent);border-radius:50%;border:3px solid #fff;box-shadow:0 0 12px var(--accent)"></div>`,
+    iconSize: [16, 16],
+    iconAnchor: [8, 8]
+  });
+
+  state.leafletMap = map;
+  state.marker = L.marker([21.0278, 105.8342], { icon }).addTo(map);
+  state.circle = L.circle([21.0278, 105.8342], { radius: 50, color: 'var(--accent)', fillOpacity: 0.1 }).addTo(map);
+}
+
+function updateGPS(data) {
+  if (!data.fix) {
+    document.getElementById('gpsLat').textContent   = '-- Chưa có fix';
+    document.getElementById('gpsLon').textContent   = '--';
+    document.getElementById('gpsAlt').textContent   = '--';
+    document.getElementById('gpsSpeed').textContent = '--';
+    return;
+  }
+
+  document.getElementById('noFixOverlay').style.display = 'none';
+  document.getElementById('gpsStatusPill').style.display = 'flex';
+
+  const lat = data.latitude,  lon = data.longitude;
+  document.getElementById('gpsLat').textContent   = lat.toFixed(6) + '°';
+  document.getElementById('gpsLon').textContent   = lon.toFixed(6) + '°';
+  document.getElementById('gpsAlt').textContent   = data.altitude ? data.altitude.toFixed(1) + ' m' : '--';
+  document.getElementById('gpsSpeed').textContent = data.speed_knots ? (data.speed_knots * 1.852).toFixed(1) + ' km/h' : '0 km/h';
+  document.getElementById('gpsSats').textContent  = data.satellites || '--';
+  document.getElementById('gpsTime').textContent  = data.timestamp || data.time || '--';
+
+  document.getElementById('gpsLat').className   = 'coord-value';
+  document.getElementById('gpsLon').className   = 'coord-value';
+
+  if (state.leafletMap && state.marker) {
+    state.marker.setLatLng([lat, lon]);
+    state.circle.setLatLng([lat, lon]);
+    if (data.accuracy) state.circle.setRadius(data.accuracy);
+    state.leafletMap.panTo([lat, lon]);
+  }
+}
+
+function startGPS() {
+  fetch('/api/gps/start', { method: 'POST' })
+    .then(r => r.json())
+    .then(r => {
+      if (r.success) {
+        state.gpsActive = true;
+        document.getElementById('btnStartGPS').style.display = 'none';
+        document.getElementById('btnStopGPS').style.display  = 'inline-flex';
+        toast('GPS đã bật', 'success');
+        switchTab('gps');
+      } else {
+        toast('❌ ' + (r.error || 'Không bật được GPS'), 'error');
+      }
+    });
+}
+
+function stopGPS() {
+  fetch('/api/gps/stop', { method: 'POST' })
+    .then(() => {
+      state.gpsActive = false;
+      document.getElementById('btnStartGPS').style.display = 'inline-flex';
+      document.getElementById('btnStopGPS').style.display  = 'none';
+      document.getElementById('gpsStatusPill').style.display = 'none';
+      toast('GPS đã tắt', 'info');
+    });
+}
+
+function getOnceGPS() {
+  toast('Đang lấy vị trí...', 'info');
+  fetch('/api/gps/location')
+    .then(r => r.json())
+    .then(data => {
+      if (data.fix) {
+        updateGPS(data);
+        toast(`📍 ${data.latitude.toFixed(5)}, ${data.longitude.toFixed(5)}`, 'success');
+        switchTab('gps');
+      } else {
+        toast('⚠️ Chưa có tín hiệu GPS', 'error');
+      }
+    });
+}
+
+// ─── Helpers ─────────────────────────────────────────────
+function escHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function toast(msg, type = 'info') {
+  const container = document.getElementById('toast-container');
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.innerHTML = msg;
+  container.appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity 0.3s'; }, 3000);
+  setTimeout(() => el.remove(), 3400);
+}
+
+// ─── Init ────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  loadSMS();
+  refreshStatus();
+});
+
+// Enter to send
+document.addEventListener('keydown', e => {
+  if (e.ctrlKey && e.key === 'Enter' && state.composeVisible) sendSMS();
+});
+</script>
+</body>
+</html>
