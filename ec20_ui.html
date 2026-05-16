@@ -1,1103 +1,1373 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="vi" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>EC25 Dashboard</title>
+<title>Orange Pi EC20 Minicom // SMS Gateway</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
 <style>
+/* ═══════════════════════════════════════════════════════════
+   TOKENS
+═══════════════════════════════════════════════════════════ */
 :root {
-  --bg:       #0a0c0f;
-  --surface:  #111418;
-  --border:   #1e2530;
-  --border2:  #2a3340;
-  --accent:   #00d4aa;
-  --accent2:  #0090ff;
-  --warn:     #ff6b35;
-  --text:     #c8d6e5;
-  --muted:    #4a5568;
-  --green:    #22c55e;
-  --red:      #ef4444;
-  --font-mono: 'JetBrains Mono', monospace;
   --font-ui:   'Syne', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --radius:    6px;
+  --transition: 0.18s ease;
 }
 
+[data-theme="dark"] {
+  --bg:          #0b0d11;
+  --bg2:         #111418;
+  --bg3:         #181c22;
+  --border:      #1e2530;
+  --border2:     #2a3340;
+  --text:        #c8d6e5;
+  --text2:       #7a8fa6;
+  --text3:       #3d4f61;
+  --accent:      #00d4aa;
+  --accent-bg:   rgba(0,212,170,0.08);
+  --accent-brd:  rgba(0,212,170,0.25);
+  --blue:        #3b9eff;
+  --blue-bg:     rgba(59,158,255,0.08);
+  --green:       #22c55e;
+  --green-bg:    rgba(34,197,94,0.08);
+  --red:         #f87171;
+  --red-bg:      rgba(248,113,113,0.08);
+  --amber:       #fbbf24;
+  --unread-dot:  #3b9eff;
+  --shadow:      0 2px 12px rgba(0,0,0,0.4);
+  --invert-logo: 0;
+}
+
+[data-theme="light"] {
+  --bg:          #f4f6f9;
+  --bg2:         #ffffff;
+  --bg3:         #eef1f5;
+  --border:      #dde2ea;
+  --border2:     #c8d0db;
+  --text:        #1a2332;
+  --text2:       #5a6a7e;
+  --text3:       #b0bbc8;
+  --accent:      #009d80;
+  --accent-bg:   rgba(0,157,128,0.07);
+  --accent-brd:  rgba(0,157,128,0.25);
+  --blue:        #1a7fe8;
+  --blue-bg:     rgba(26,127,232,0.07);
+  --green:       #16a34a;
+  --green-bg:    rgba(22,163,74,0.07);
+  --red:         #dc2626;
+  --red-bg:      rgba(220,38,38,0.07);
+  --amber:       #d97706;
+  --unread-dot:  #1a7fe8;
+  --shadow:      0 2px 12px rgba(0,0,0,0.08);
+  --invert-logo: 1;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   RESET & BASE
+═══════════════════════════════════════════════════════════ */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body { height: 100%; }
 
 body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-mono);
   font-size: 13px;
+  line-height: 1.5;
+  display: flex;
+  flex-direction: column;
   min-height: 100vh;
-  overflow-x: hidden;
+  transition: background var(--transition), color var(--transition);
 }
 
-/* Scanline overlay */
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px);
-  pointer-events: none;
-  z-index: 9999;
-}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
 
-/* ─── Header ─── */
+/* ═══════════════════════════════════════════════════════════
+   SCROLLBAR
+═══════════════════════════════════════════════════════════ */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+* { scrollbar-width: thin; scrollbar-color: var(--border2) transparent; }
+
+/* ═══════════════════════════════════════════════════════════
+   HEADER
+═══════════════════════════════════════════════════════════ */
 .header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 24px;
+  padding: 0 24px;
+  height: 54px;
   border-bottom: 1px solid var(--border);
-  background: var(--surface);
-  position: sticky; top: 0; z-index: 100;
+  background: var(--bg2);
+  position: sticky; top: 0; z-index: 200;
+  flex-shrink: 0;
+  transition: background var(--transition), border-color var(--transition);
 }
 
 .logo {
-  font-family: var(--font-ui);
-  font-weight: 800;
-  font-size: 18px;
-  letter-spacing: -0.5px;
-  color: #fff;
   display: flex;
   align-items: center;
   gap: 10px;
+  font-family: var(--font-ui);
+  font-weight: 800;
+  font-size: 15px;
+  color: var(--text);
+  letter-spacing: -0.3px;
+  white-space: nowrap;
 }
 
-.logo .badge {
+.logo-icon {
+  width: 30px; height: 30px;
   background: var(--accent);
-  color: #000;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  padding: 2px 7px;
-  border-radius: 3px;
-  letter-spacing: 1px;
-}
-
-.header-status {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-}
-
-.status-pill {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.dot {
-  width: 7px; height: 7px;
-  border-radius: 50%;
-  background: var(--muted);
+  border-radius: 7px;
+  display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
 }
-.dot.online  { background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 2s infinite; }
-.dot.offline { background: var(--red); }
 
-@keyframes pulse {
-  0%, 100% { opacity: 1; } 50% { opacity: 0.4; }
+.logo-icon svg { color: #000; }
+
+.logo-sep {
+  color: var(--text3);
+  font-weight: 300;
+  font-size: 18px;
+  margin: 0 2px;
 }
 
-/* ─── Signal bar ─── */
+.logo-sub {
+  color: var(--text2);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+/* Signal */
+.signal-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text2);
+}
+
 .signal-bars {
   display: flex; align-items: flex-end; gap: 2px; height: 14px;
 }
 .signal-bars span {
-  width: 4px;
+  width: 4px; border-radius: 1px;
   background: var(--border2);
-  border-radius: 1px;
-  transition: background 0.4s;
+  transition: background 0.3s;
 }
-.signal-bars span:nth-child(1) { height: 4px; }
-.signal-bars span:nth-child(2) { height: 7px; }
-.signal-bars span:nth-child(3) { height: 10px; }
+.signal-bars span:nth-child(1) { height: 5px; }
+.signal-bars span:nth-child(2) { height: 8px; }
+.signal-bars span:nth-child(3) { height: 11px; }
 .signal-bars span:nth-child(4) { height: 14px; }
-.signal-bars.s1 span:nth-child(1) { background: var(--warn); }
-.signal-bars.s2 span:nth-child(1), .signal-bars.s2 span:nth-child(2) { background: #f59e0b; }
-.signal-bars.s3 span:nth-child(1), .signal-bars.s3 span:nth-child(2), .signal-bars.s3 span:nth-child(3) { background: var(--accent); }
+.signal-bars.s1 span:nth-child(1) { background: var(--red); }
+.signal-bars.s2 span:nth-child(-n+2) { background: var(--amber); }
+.signal-bars.s3 span:nth-child(-n+3) { background: var(--accent); }
 .signal-bars.s4 span { background: var(--green); }
 
-/* ─── Layout ─── */
-.layout {
-  display: grid;
-  grid-template-columns: 340px 1fr;
-  grid-template-rows: auto 1fr;
-  gap: 0;
-  height: calc(100vh - 53px);
+/* Status dot */
+.dot {
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+  background: var(--text3);
+}
+.dot.online  { background: var(--green); box-shadow: 0 0 6px var(--green); animation: blink 2.5s infinite; }
+.dot.offline { background: var(--red); }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+/* Theme toggle */
+.theme-btn {
+  width: 32px; height: 32px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  color: var(--text2);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all var(--transition);
+  flex-shrink: 0;
+}
+.theme-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ═══════════════════════════════════════════════════════════
+   LAYOUT
+═══════════════════════════════════════════════════════════ */
+.app-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
 }
 
-/* ─── Sidebar ─── */
+/* ═══════════════════════════════════════════════════════════
+   SIDEBAR
+═══════════════════════════════════════════════════════════ */
 .sidebar {
+  width: 320px;
+  flex-shrink: 0;
   border-right: 1px solid var(--border);
+  background: var(--bg2);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  transition: background var(--transition);
 }
 
-/* ─── Tabs ─── */
+/* Tabs */
 .tabs {
   display: flex;
   border-bottom: 1px solid var(--border);
-  background: var(--surface);
+  flex-shrink: 0;
 }
-
 .tab {
   flex: 1;
-  padding: 12px;
+  padding: 11px 6px;
   text-align: center;
-  cursor: pointer;
   font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 1px;
-  color: var(--muted);
-  border-bottom: 2px solid transparent;
-  transition: all 0.2s;
+  font-weight: 700;
+  letter-spacing: .8px;
   text-transform: uppercase;
+  color: var(--text2);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all var(--transition);
 }
 .tab:hover { color: var(--text); }
 .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 
-/* ─── Panel ─── */
-.panel { display: none; flex: 1; flex-direction: column; overflow: hidden; }
+/* Panel */
+.panel { display: none; flex-direction: column; flex: 1; overflow: hidden; }
 .panel.active { display: flex; }
 
-/* ─── SMS List ─── */
+/* ─── SMS toolbar ─── */
 .sms-toolbar {
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
-.btn {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
-  padding: 7px 14px;
-  border-radius: 4px;
-  border: 1px solid var(--border2);
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
-  transition: all 0.15s;
-  display: flex; align-items: center; gap: 6px;
-  white-space: nowrap;
-}
-.btn:hover { border-color: var(--accent); color: var(--accent); }
-.btn.primary { background: var(--accent); border-color: var(--accent); color: #000; font-weight: 700; }
-.btn.primary:hover { background: #00f5c4; }
-.btn.danger { border-color: var(--red); color: var(--red); }
-.btn.danger:hover { background: rgba(239,68,68,0.1); }
-
-.search-input {
+.search-box {
   flex: 1;
-  background: var(--bg);
+  background: var(--bg3);
   border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 7px 10px;
+  border-radius: var(--radius);
+  padding: 7px 10px 7px 32px;
   color: var(--text);
   font-family: var(--font-mono);
   font-size: 12px;
   outline: none;
-  transition: border-color 0.2s;
+  transition: border-color var(--transition);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%237a8fa6' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: 10px center;
 }
-.search-input:focus { border-color: var(--accent); }
-.search-input::placeholder { color: var(--muted); }
+.search-box:focus { border-color: var(--accent); }
+.search-box::placeholder { color: var(--text3); }
 
+/* ─── SMS counter ─── */
+.sms-meta {
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--text2);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.select-all-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--bg3);
+}
+
+.select-all-row label {
+  font-size: 11px;
+  color: var(--text2);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
+}
+
+/* ─── SMS list ─── */
 .sms-list {
   flex: 1;
   overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border2) transparent;
 }
 
 .sms-item {
-  padding: 12px 16px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 12px;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background var(--transition);
   position: relative;
 }
-.sms-item:hover { background: rgba(255,255,255,0.02); }
-.sms-item.selected { background: rgba(0,212,170,0.06); border-left: 2px solid var(--accent); }
-.sms-item.unread .sms-from { color: #fff; }
-.sms-item.unread::after {
-  content: '';
-  position: absolute;
-  top: 14px; right: 14px;
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  background: var(--accent2);
-}
+.sms-item:hover { background: var(--bg3); }
+.sms-item.selected-item { background: var(--accent-bg); border-left: 2px solid var(--accent); }
+.sms-item.selected-item .sms-from { color: var(--accent); }
+
+.sms-item input[type="checkbox"] { margin-top: 3px; flex-shrink: 0; accent-color: var(--accent); cursor: pointer; }
+
+.sms-content { flex: 1; min-width: 0; }
 
 .sms-from {
-  font-weight: 600;
+  font-weight: 700;
   font-size: 12px;
   color: var(--text);
-  margin-bottom: 3px;
+  margin-bottom: 2px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
-.sms-from .idx { color: var(--muted); font-weight: 400; font-size: 10px; }
-
+.sms-idx { font-weight: 400; color: var(--text3); font-size: 10px; }
+.unread-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--unread-dot);
+  flex-shrink: 0;
+  box-shadow: 0 0 4px var(--unread-dot);
+}
 .sms-preview {
-  color: var(--muted);
   font-size: 11px;
+  color: var(--text2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.sms-time { font-size: 10px; color: var(--muted); margin-top: 3px; }
+.sms-time { font-size: 10px; color: var(--text3); margin-top: 3px; }
 
-.empty-state {
+/* Empty state */
+.empty {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: var(--muted);
-  gap: 8px;
+  gap: 10px;
+  color: var(--text3);
+  padding: 40px;
+  text-align: center;
 }
-.empty-icon { font-size: 32px; opacity: 0.3; }
+.empty-icon { font-size: 36px; opacity: .5; }
 
-/* ─── SMS Detail / Compose ─── */
-.main-area {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.detail-header {
-  padding: 16px 24px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.detail-from {
-  flex: 1;
-  font-family: var(--font-ui);
-  font-size: 16px;
-  font-weight: 600;
-  color: #fff;
-}
-
-.detail-body {
-  flex: 1;
-  padding: 24px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.msg-bubble {
-  max-width: 80%;
-  padding: 10px 14px;
-  border-radius: 8px;
-  line-height: 1.6;
-  font-size: 13px;
-}
-.msg-bubble.incoming {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  align-self: flex-start;
-}
-.msg-bubble.outgoing {
-  background: rgba(0,212,170,0.12);
-  border: 1px solid rgba(0,212,170,0.3);
-  color: #fff;
-  align-self: flex-end;
-}
-
-.msg-time { font-size: 10px; color: var(--muted); margin-top: 3px; }
-
-/* ─── Compose ─── */
-.compose-bar {
-  padding: 16px 24px;
+/* Compose button */
+.compose-btn-wrap {
+  padding: 10px 12px;
   border-top: 1px solid var(--border);
-  background: var(--surface);
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.compose-number {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.compose-label {
-  font-size: 11px;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  min-width: 30px;
-}
-
-.compose-input {
-  flex: 1;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 8px 12px;
-  color: var(--text);
-  font-family: var(--font-mono);
-  font-size: 13px;
-  outline: none;
-  transition: border-color 0.2s;
-}
-.compose-input:focus { border-color: var(--accent); }
-.compose-input::placeholder { color: var(--muted); }
-
-textarea.compose-input {
-  resize: none;
-  height: 68px;
-  line-height: 1.5;
-}
-
-.char-count { font-size: 10px; color: var(--muted); text-align: right; }
-
-.compose-actions {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-/* ─── GPS Panel ─── */
-.gps-panel {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  overflow: hidden;
-}
-
-.gps-info-bar {
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.gps-coords {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-
-.coord-box {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 8px 10px;
-}
-.coord-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 3px; }
-.coord-value {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--accent);
-  font-variant-numeric: tabular-nums;
-}
-.coord-value.no-fix { color: var(--muted); font-size: 11px; }
-
-.gps-meta {
-  display: flex;
-  gap: 12px;
-  font-size: 11px;
-  color: var(--muted);
-}
-
-.gps-meta span { display: flex; align-items: center; gap: 4px; }
-
-.gps-controls {
+  flex-shrink: 0;
   display: flex;
   gap: 8px;
-  padding: 0 4px;
 }
 
-#map {
-  flex: 1;
-  min-height: 200px;
-  filter: brightness(0.85) contrast(1.1) saturate(0.8);
-}
-
-/* Custom map dark tiles */
-
-/* ─── Status panel in sidebar ─── */
+/* ─── Status panel ─── */
 .status-panel {
-  padding: 16px;
+  padding: 14px 12px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
+  overflow-y: auto;
 }
 
 .stat-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 12px;
-  background: var(--bg);
+  padding: 9px 11px;
+  background: var(--bg3);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius);
 }
-.stat-key { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
-.stat-val { color: var(--text); font-size: 12px; font-weight: 600; }
-.stat-val.ok { color: var(--green); }
-.stat-val.err { color: var(--red); }
+.stat-key { font-size: 11px; color: var(--text2); text-transform: uppercase; letter-spacing: .5px; }
+.stat-val { font-size: 12px; font-weight: 600; color: var(--text); }
+.stat-val.ok     { color: var(--green); }
+.stat-val.err    { color: var(--red); }
 .stat-val.accent { color: var(--accent); }
+.stat-val.blue   { color: var(--blue); }
 
-/* ─── Toast ─── */
-#toast-container {
-  position: fixed;
-  bottom: 24px; right: 24px;
+/* ═══════════════════════════════════════════════════════════
+   MAIN CONTENT
+═══════════════════════════════════════════════════════════ */
+.main {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  z-index: 9000;
+  overflow: hidden;
+  min-width: 0;
 }
 
-.toast {
-  background: var(--surface);
-  border: 1px solid var(--border2);
-  border-radius: 6px;
-  padding: 12px 16px;
-  font-size: 12px;
-  min-width: 220px;
-  max-width: 320px;
-  animation: slideIn 0.2s ease;
+/* View switcher */
+.view { display: none; flex-direction: column; flex: 1; overflow: hidden; }
+.view.active { display: flex; }
+
+/* ─── Detail header ─── */
+.detail-header {
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  transition: background var(--transition);
+}
+.detail-title {
+  flex: 1;
+  font-family: var(--font-ui);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+.detail-sub {
+  font-size: 11px;
+  color: var(--text2);
+  font-family: var(--font-mono);
+  font-weight: 400;
+}
+
+/* ─── Message bubbles ─── */
+.detail-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--bg);
+}
+
+.bubble {
+  max-width: 75%;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+.bubble.in {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  align-self: flex-start;
+  border-bottom-left-radius: 3px;
+}
+.bubble.out {
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-brd);
+  align-self: flex-end;
+  border-bottom-right-radius: 3px;
+}
+.bubble-time { font-size: 10px; color: var(--text3); margin-top: 4px; }
+
+/* ─── Compose bar ─── */
+.compose-bar {
+  padding: 14px 24px;
+  border-top: 1px solid var(--border);
+  background: var(--bg2);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex-shrink: 0;
+  transition: background var(--transition);
+}
+
+.compose-row {
   display: flex;
   align-items: center;
   gap: 10px;
 }
-.toast.success { border-left: 3px solid var(--green); }
-.toast.error   { border-left: 3px solid var(--red); }
-.toast.info    { border-left: 3px solid var(--accent2); }
+.compose-label {
+  font-size: 10px;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: .8px;
+  min-width: 24px;
+}
+.compose-input {
+  flex: 1;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 11px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  outline: none;
+  transition: border-color var(--transition);
+}
+.compose-input:focus { border-color: var(--accent); }
+.compose-input::placeholder { color: var(--text3); }
+textarea.compose-input { resize: none; height: 72px; line-height: 1.5; }
 
-@keyframes slideIn {
-  from { transform: translateX(20px); opacity: 0; }
-  to   { transform: translateX(0);    opacity: 1; }
+.compose-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.char-count { font-size: 11px; color: var(--text3); }
+
+/* ─── Compose new (full panel) ─── */
+.compose-new-body {
+  flex: 1;
+  padding: 28px 32px;
+  overflow-y: auto;
+  background: var(--bg);
+}
+.compose-new-inner {
+  max-width: 520px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.form-label {
+  font-size: 11px;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: .8px;
+  margin-bottom: 5px;
 }
 
-/* ─── Loading ─── */
-.loading {
-  display: inline-block;
-  width: 10px; height: 10px;
-  border: 1.5px solid var(--border2);
+/* ═══════════════════════════════════════════════════════════
+   BUTTONS
+═══════════════════════════════════════════════════════════ */
+.btn {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .4px;
+  padding: 7px 13px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border2);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px;
+  transition: all var(--transition);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.btn:hover { border-color: var(--text2); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #000; font-weight: 800; }
+.btn-primary:hover { filter: brightness(1.1); }
+
+.btn-danger  { color: var(--red); border-color: var(--red); }
+.btn-danger:hover  { background: var(--red-bg); }
+
+.btn-blue    { color: var(--blue); border-color: var(--blue); }
+.btn-blue:hover    { background: var(--blue-bg); }
+
+.btn-full { width: 100%; justify-content: center; padding: 10px 16px; font-size: 12px; }
+
+/* ═══════════════════════════════════════════════════════════
+   BULK ACTIONS BAR
+═══════════════════════════════════════════════════════════ */
+.bulk-bar {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--red-bg);
+  border-top: 1px solid rgba(248,113,113,0.2);
+  flex-shrink: 0;
+  animation: slideDown .15s ease;
+}
+.bulk-bar.visible { display: flex; }
+@keyframes slideDown { from{transform:translateY(-6px);opacity:0} to{transform:translateY(0);opacity:1} }
+.bulk-label { font-size: 11px; color: var(--red); font-weight: 700; flex: 1; }
+
+/* ═══════════════════════════════════════════════════════════
+   DELETE ALL MODAL
+═══════════════════════════════════════════════════════════ */
+.modal-overlay {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.6);
+  z-index: 500;
+  align-items: center;
+  justify-content: center;
+}
+.modal-overlay.open { display: flex; }
+.modal {
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: 10px;
+  padding: 24px;
+  width: min(420px, 92vw);
+  box-shadow: var(--shadow);
+  animation: pop .18s ease;
+}
+@keyframes pop { from{transform:scale(.95);opacity:0} to{transform:scale(1);opacity:1} }
+.modal-title {
+  font-family: var(--font-ui);
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.modal-desc { font-size: 12px; color: var(--text2); margin-bottom: 18px; line-height: 1.6; }
+.modal-options { display: flex; flex-direction: column; gap: 7px; margin-bottom: 18px; }
+.modal-option {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color var(--transition);
+}
+.modal-option:hover { border-color: var(--accent); }
+.modal-option input[type="radio"] { accent-color: var(--accent); }
+.modal-option-text { font-size: 12px; }
+.modal-option-text b { color: var(--text); display: block; }
+.modal-option-text span { color: var(--text2); font-size: 11px; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* ═══════════════════════════════════════════════════════════
+   TOAST
+═══════════════════════════════════════════════════════════ */
+#toasts {
+  position: fixed;
+  bottom: 20px; right: 20px;
+  display: flex; flex-direction: column; gap: 7px;
+  z-index: 1000;
+  pointer-events: none;
+}
+.toast {
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  font-size: 12px;
+  min-width: 200px;
+  max-width: 300px;
+  display: flex; align-items: center; gap: 9px;
+  animation: toastIn .2s ease;
+  box-shadow: var(--shadow);
+  pointer-events: auto;
+}
+@keyframes toastIn { from{transform:translateY(8px);opacity:0} to{transform:translateY(0);opacity:1} }
+.toast.success { border-left: 3px solid var(--green); }
+.toast.error   { border-left: 3px solid var(--red); }
+.toast.info    { border-left: 3px solid var(--blue); }
+
+/* ═══════════════════════════════════════════════════════════
+   SPINNER
+═══════════════════════════════════════════════════════════ */
+.spin {
+  width: 12px; height: 12px;
+  border: 2px solid var(--border2);
   border-top-color: var(--accent);
   border-radius: 50%;
-  animation: spin 0.6s linear infinite;
+  animation: spin .6s linear infinite;
+  flex-shrink: 0;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* ─── New SMS badge animation ─── */
-@keyframes flashBorder {
-  0%, 100% { border-color: var(--border); }
-  50% { border-color: var(--accent2); box-shadow: 0 0 12px rgba(0,144,255,0.3); }
-}
-.new-sms-flash { animation: flashBorder 1s ease 3; }
-
-/* ─── Scrollbar ─── */
-::-webkit-scrollbar { width: 4px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
-
-/* ─── GPS No Fix ─── */
-.no-fix-overlay {
-  position: absolute;
-  inset: 0;
-  background: rgba(10,12,15,0.85);
+/* ═══════════════════════════════════════════════════════════
+   FOOTER
+═══════════════════════════════════════════════════════════ */
+.footer {
+  padding: 11px 24px;
+  border-top: 1px solid var(--border);
+  background: var(--bg2);
+  font-size: 11px;
+  color: var(--text2);
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  z-index: 1000;
-  color: var(--muted);
+  gap: 6px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  text-align: center;
+  transition: background var(--transition);
 }
-.no-fix-overlay .spinner { width: 24px; height: 24px; border-width: 2px; }
+.footer a { color: var(--accent); font-weight: 600; }
+.footer .heart { color: #f87171; }
+.footer .sep { color: var(--text3); margin: 0 2px; }
 
 </style>
 </head>
 <body>
 
-<!-- Header -->
+<!-- ═══ HEADER ═══ -->
 <header class="header">
   <div class="logo">
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--accent)">
-      <rect x="2" y="6" width="20" height="12" rx="2"/>
-      <path d="M8 6V4M16 6V4M2 10h20"/>
-      <circle cx="7" cy="15" r="1" fill="currentColor"/>
-      <circle cx="12" cy="15" r="1" fill="currentColor"/>
-    </svg>
-    EC25 Dashboard
-    <span class="badge">LTE</span>
+    <div class="logo-icon">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+        <rect x="2" y="7" width="20" height="14" rx="2"/>
+        <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/>
+        <line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/>
+      </svg>
+    </div>
+    <span>Orange Pi EC20 Minicom</span>
+    <span class="logo-sep">//</span>
+    <span class="logo-sub">SMS Gateway</span>
   </div>
 
-  <div class="header-status">
-    <div class="status-pill">
-      <div class="signal-bars" id="signalBars">
-        <span></span><span></span><span></span><span></span>
-      </div>
-      <span id="operatorName">--</span>
+  <div class="header-right">
+    <div class="signal-wrap">
+      <div class="signal-bars" id="signalBars"><span></span><span></span><span></span><span></span></div>
+      <span id="operatorName" style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">--</span>
     </div>
-    <div class="status-pill">
+    <div class="signal-wrap">
       <div class="dot" id="connDot"></div>
       <span id="connLabel">Đang kết nối...</span>
     </div>
-    <div class="status-pill" id="gpsStatusPill" style="display:none">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2">
-        <circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9" stroke-dasharray="4 2"/>
+    <button class="theme-btn" onclick="toggleTheme()" title="Chuyển giao diện sáng/tối" id="themeBtn">
+      <svg id="iconMoon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
       </svg>
-      <span id="gpsStatusLabel" style="color:var(--accent)">GPS Active</span>
-    </div>
+      <svg id="iconSun" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none">
+        <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
+        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+        <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
+        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+      </svg>
+    </button>
   </div>
 </header>
 
-<!-- Layout -->
-<div class="layout">
+<!-- ═══ BODY ═══ -->
+<div class="app-body">
 
-  <!-- Sidebar -->
+  <!-- SIDEBAR -->
   <aside class="sidebar">
     <div class="tabs">
-      <div class="tab active" onclick="switchTab('sms')" id="tab-sms">📨 SMS</div>
-      <div class="tab" onclick="switchTab('gps')" id="tab-gps">🛰 GPS</div>
-      <div class="tab" onclick="switchTab('status')" id="tab-status">📡 Modem</div>
+      <div class="tab active" id="tab-sms" onclick="switchTab('sms')">📨 SMS</div>
+      <div class="tab" id="tab-modem" onclick="switchTab('modem')">📡 Modem</div>
     </div>
 
-    <!-- SMS Panel -->
+    <!-- ── SMS Panel ── -->
     <div class="panel active" id="panel-sms">
+
       <div class="sms-toolbar">
-        <input type="text" class="search-input" placeholder="Tìm tin nhắn..." id="searchInput" oninput="filterSMS()">
+        <input class="search-box" type="text" id="searchBox" placeholder="Tìm tin nhắn..." oninput="filterSMS()">
         <button class="btn" onclick="loadSMS()" title="Làm mới">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-            <path d="M3 3v5h5"/>
-          </svg>
-        </button>
-      </div>
-      <div class="sms-list" id="smsList">
-        <div class="empty-state">
-          <div class="empty-icon">📭</div>
-          <div>Đang tải tin nhắn...</div>
-        </div>
-      </div>
-      <button class="btn primary" onclick="showCompose()" style="margin:12px;border-radius:4px;">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-          <path d="M12 5v14M5 12h14"/>
-        </svg>
-        Soạn tin nhắn mới
-      </button>
-    </div>
-
-    <!-- GPS Panel -->
-    <div class="panel" id="panel-gps">
-      <div class="gps-info-bar">
-        <div class="gps-controls">
-          <button class="btn primary" onclick="startGPS()" id="btnStartGPS">▶ Bật GPS</button>
-          <button class="btn danger" onclick="stopGPS()" id="btnStopGPS" style="display:none">■ Tắt</button>
-          <button class="btn" onclick="getOnceGPS()">📍 Lấy vị trí</button>
-        </div>
-        <div class="gps-coords">
-          <div class="coord-box">
-            <div class="coord-label">Latitude</div>
-            <div class="coord-value no-fix" id="gpsLat">-- Chưa có fix</div>
-          </div>
-          <div class="coord-box">
-            <div class="coord-label">Longitude</div>
-            <div class="coord-value no-fix" id="gpsLon">--</div>
-          </div>
-          <div class="coord-box">
-            <div class="coord-label">Altitude</div>
-            <div class="coord-value no-fix" id="gpsAlt">--</div>
-          </div>
-          <div class="coord-box">
-            <div class="coord-label">Tốc độ</div>
-            <div class="coord-value no-fix" id="gpsSpeed">--</div>
-          </div>
-        </div>
-        <div class="gps-meta">
-          <span>🛰 Vệ tinh: <b id="gpsSats">--</b></span>
-          <span>⏱ <span id="gpsTime">--</span></span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Status Panel -->
-    <div class="panel" id="panel-status">
-      <div class="status-panel" id="statusPanel">
-        <div class="stat-row">
-          <span class="stat-key">Trạng thái</span>
-          <span class="stat-val" id="sModem">--</span>
-        </div>
-        <div class="stat-row">
-          <span class="stat-key">Nhà mạng</span>
-          <span class="stat-val accent" id="sOperator">--</span>
-        </div>
-        <div class="stat-row">
-          <span class="stat-key">Kết nối mạng</span>
-          <span class="stat-val" id="sNetwork">--</span>
-        </div>
-        <div class="stat-row">
-          <span class="stat-key">Tín hiệu</span>
-          <span class="stat-val" id="sSignal">--</span>
-        </div>
-        <div class="stat-row">
-          <span class="stat-key">IMSI</span>
-          <span class="stat-val" id="sIMSI" style="font-size:11px">--</span>
-        </div>
-        <button class="btn" onclick="refreshStatus()" style="margin-top:4px">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
             <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>
           </svg>
-          Làm mới
+        </button>
+      </div>
+
+      <div class="sms-meta">
+        <span id="smsMeta">-- tin nhắn</span>
+        <button class="btn btn-danger" style="padding:3px 8px;font-size:10px" onclick="openDeleteAllModal()">
+          🗑 Xoá hàng loạt
+        </button>
+      </div>
+
+      <div class="select-all-row">
+        <label>
+          <input type="checkbox" id="checkAll" onchange="toggleSelectAll(this.checked)">
+          Chọn tất cả
+        </label>
+        <span id="selectedCount" style="font-size:11px;color:var(--text3);margin-left:auto"></span>
+      </div>
+
+      <!-- Bulk action bar -->
+      <div class="bulk-bar" id="bulkBar">
+        <span class="bulk-label" id="bulkLabel">0 đã chọn</span>
+        <button class="btn btn-danger" style="padding:5px 10px" onclick="deleteSelected()">
+          🗑 Xoá đã chọn
+        </button>
+        <button class="btn" style="padding:5px 10px" onclick="clearSelection()">✕</button>
+      </div>
+
+      <div class="sms-list" id="smsList">
+        <div class="empty"><div class="empty-icon">📭</div><div>Đang tải...</div></div>
+      </div>
+
+      <div class="compose-btn-wrap">
+        <button class="btn btn-primary btn-full" onclick="showView('compose')">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M12 5v14M5 12h14"/>
+          </svg>
+          Soạn tin nhắn mới
+        </button>
+      </div>
+    </div>
+
+    <!-- ── Modem Panel ── -->
+    <div class="panel" id="panel-modem">
+      <div class="status-panel" id="statusPanel">
+        <div class="stat-row"><span class="stat-key">Trạng thái</span><span class="stat-val err" id="sConn">--</span></div>
+        <div class="stat-row"><span class="stat-key">Model</span><span class="stat-val blue" id="sModel">--</span></div>
+        <div class="stat-row"><span class="stat-key">Firmware</span><span class="stat-val" id="sFW" style="font-size:10px">--</span></div>
+        <div class="stat-row"><span class="stat-key">Nhà mạng</span><span class="stat-val accent" id="sOp">--</span></div>
+        <div class="stat-row"><span class="stat-key">Kết nối mạng</span><span class="stat-val" id="sNet">--</span></div>
+        <div class="stat-row"><span class="stat-key">Tín hiệu</span><span class="stat-val" id="sSig">--</span></div>
+        <div class="stat-row"><span class="stat-key">IMSI</span><span class="stat-val" id="sIMSI" style="font-size:11px">--</span></div>
+        <div class="stat-row"><span class="stat-key">Số của SIM</span><span class="stat-val accent" id="sNum">--</span></div>
+        <button class="btn btn-full" style="margin-top:4px" onclick="refreshStatus()">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>
+          </svg>
+          Làm mới trạng thái
         </button>
       </div>
     </div>
   </aside>
 
-  <!-- Main content -->
-  <main class="main-area" id="mainArea">
+  <!-- MAIN -->
+  <main class="main">
 
-    <!-- SMS Detail view -->
-    <div id="viewDetail" style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
-      <div class="detail-header">
-        <div class="detail-from" id="detailFrom">Chọn tin nhắn để xem</div>
-        <button class="btn danger" id="btnDelete" onclick="deleteSelected()" style="display:none">🗑 Xoá</button>
-      </div>
-      <div class="detail-body" id="detailBody">
-        <div class="empty-state" style="height:100%">
-          <div class="empty-icon">💬</div>
-          <div style="color:var(--muted)">Chọn một tin nhắn để xem nội dung</div>
-          <div style="color:var(--muted);font-size:11px">hoặc soạn tin nhắn mới</div>
-        </div>
+    <!-- ── Welcome / empty ── -->
+    <div class="view active" id="view-welcome">
+      <div class="empty" style="flex:1">
+        <div class="empty-icon">💬</div>
+        <div style="font-family:var(--font-ui);font-size:15px;font-weight:700;color:var(--text)">Chọn tin nhắn để xem</div>
+        <div style="color:var(--text2)">hoặc soạn tin nhắn mới</div>
       </div>
     </div>
 
-    <!-- Compose view -->
-    <div id="viewCompose" style="display:none;flex-direction:column;flex:1;overflow:hidden;">
+    <!-- ── Detail view ── -->
+    <div class="view" id="view-detail">
       <div class="detail-header">
-        <div class="detail-from">Soạn tin nhắn mới</div>
-        <button class="btn" onclick="hideCompose()">✕ Huỷ</button>
+        <div style="flex:1">
+          <div class="detail-title" id="detailFrom">--</div>
+          <div class="detail-sub" id="detailSub"></div>
+        </div>
+        <button class="btn btn-blue" onclick="replyTo()" id="btnReply">↩ Trả lời</button>
+        <button class="btn btn-danger" onclick="deleteCurrentSMS()" id="btnDeleteCur">🗑 Xoá</button>
       </div>
-      <div style="flex:1;padding:24px;overflow-y:auto;">
-        <div style="max-width:500px;display:flex;flex-direction:column;gap:12px;">
-          <div style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:1px;">Số điện thoại người nhận</div>
-          <input type="tel" class="compose-input" id="composeNumber" placeholder="+84901234567" style="width:100%">
-          <div style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-top:8px;">Nội dung</div>
-          <textarea class="compose-input" id="composeText" placeholder="Nhập nội dung tin nhắn..." oninput="updateCharCount()" style="width:100%;height:120px"></textarea>
-          <div class="compose-actions">
-            <span class="char-count" id="charCount">0 / 160 ký tự</span>
-            <button class="btn primary" onclick="sendSMS()" id="btnSend">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                <path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/>
-              </svg>
-              Gửi SMS
+      <div class="detail-body" id="detailBody"></div>
+      <div class="compose-bar" id="replyBar" style="display:none">
+        <div class="compose-row">
+          <span class="compose-label">Tới</span>
+          <input class="compose-input" id="replyNum" type="tel" placeholder="+84...">
+        </div>
+        <div class="compose-row">
+          <span class="compose-label">Nội dung</span>
+          <textarea class="compose-input" id="replyText" placeholder="Nhập nội dung... (Ctrl+Enter để gửi)" oninput="updateCC('replyText','replyCC')"></textarea>
+        </div>
+        <div class="compose-footer">
+          <span class="char-count" id="replyCC">0 / 160</span>
+          <div style="display:flex;gap:8px">
+            <button class="btn" onclick="hideReply()">Huỷ</button>
+            <button class="btn btn-primary" id="btnReplySend" onclick="sendReply()">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+              Gửi
             </button>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- GPS Map view (shown when GPS tab active) -->
-    <div id="viewGPS" style="display:none;flex:1;flex-direction:column;overflow:hidden;position:relative;">
-      <div id="map" style="flex:1"></div>
-      <div class="no-fix-overlay" id="noFixOverlay">
-        <div class="loading spinner"></div>
-        <div>Đang chờ tín hiệu GPS...</div>
-        <div style="font-size:11px">Đảm bảo anten GPS được kết nối và modem ở ngoài trời</div>
+    <!-- ── Compose new ── -->
+    <div class="view" id="view-compose">
+      <div class="detail-header">
+        <div class="detail-title">✉ Soạn tin nhắn mới</div>
+        <button class="btn" onclick="showView('welcome')">✕ Huỷ</button>
+      </div>
+      <div class="compose-new-body">
+        <div class="compose-new-inner">
+          <div>
+            <div class="form-label">Số điện thoại người nhận</div>
+            <input class="compose-input" id="newNum" type="tel" placeholder="+84901234567" style="width:100%">
+          </div>
+          <div>
+            <div class="form-label">Nội dung tin nhắn</div>
+            <textarea class="compose-input" id="newText" placeholder="Nhập nội dung... Hỗ trợ tiếng Việt có dấu ✓" style="width:100%;height:120px" oninput="updateCC('newText','newCC')"></textarea>
+            <div style="display:flex;justify-content:space-between;margin-top:5px">
+              <span class="char-count" id="newCC">0 ký tự</span>
+              <span class="char-count" id="newCCsms"></span>
+            </div>
+          </div>
+          <button class="btn btn-primary btn-full" id="btnSendNew" onclick="sendNew()" style="margin-top:4px">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+            Gửi SMS (Ctrl + Enter)
+          </button>
+        </div>
       </div>
     </div>
 
   </main>
 </div>
 
-<!-- Toast container -->
-<div id="toast-container"></div>
+<!-- ═══ FOOTER ═══ -->
+<footer class="footer">
+  <span>Được tạo ra</span>
+  <span class="heart">❤</span>
+  <span>bởi</span>
+  <a href="https://github.com/thanhtantran" target="_blank" rel="noopener">Tony Trần</a>
+  <span class="sep">·</span>
+  <span>Copyright 2026 ©</span>
+  <span class="sep">·</span>
+  <a href="https://orangepi.vn/" target="_blank" rel="noopener">Orange Pi Việt Nam</a>
+</footer>
 
+<!-- ═══ DELETE ALL MODAL ═══ -->
+<div class="modal-overlay" id="deleteAllModal">
+  <div class="modal">
+    <div class="modal-title">🗑 Xoá tin nhắn hàng loạt</div>
+    <div class="modal-desc">Chọn loại tin nhắn muốn xoá. Hành động này <b>không thể hoàn tác</b>.</div>
+    <div class="modal-options">
+      <label class="modal-option">
+        <input type="radio" name="delFlag" value="1">
+        <div class="modal-option-text"><b>Xoá tin đã đọc</b><span>Giữ lại tin chưa đọc</span></div>
+      </label>
+      <label class="modal-option">
+        <input type="radio" name="delFlag" value="2">
+        <div class="modal-option-text"><b>Xoá tin đã đọc + đã gửi</b><span>Chỉ giữ tin chưa đọc</span></div>
+      </label>
+      <label class="modal-option">
+        <input type="radio" name="delFlag" value="4" checked>
+        <div class="modal-option-text"><b style="color:var(--red)">Xoá tất cả tin nhắn</b><span>Toàn bộ hộp thư SIM</span></div>
+      </label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeDeleteAllModal()">Huỷ</button>
+      <button class="btn btn-danger" onclick="doDeleteAll()">Xác nhận xoá</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ TOASTS ═══ -->
+<div id="toasts"></div>
+
+<!-- ═══ SCRIPTS ═══ -->
 <script>
-// ─── State ───────────────────────────────────────────────
-const state = {
-  smsList: [],
-  selectedIdx: null,
-  gpsActive: false,
-  currentTab: 'sms',
-  sentMessages: {},   // number -> [messages]
-  mapInitialized: false,
-  leafletMap: null,
-  marker: null,
-  circle: null
+// ──────────────────────────────────────────────────────────
+// State
+// ──────────────────────────────────────────────────────────
+const S = {
+  smsList:    [],
+  selected:   null,   // index of detail view
+  sentByNum:  {},     // {number: [{body, time}]}
+  checked:    new Set(), // indices checked for bulk
 };
 
-// ─── Socket ──────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────
+// Socket
+// ──────────────────────────────────────────────────────────
 const socket = io();
-
-socket.on('connect', () => {
-  socket.emit('request_sms');
-  socket.emit('request_status');
-});
-
-socket.on('status_update', updateStatusUI);
-socket.on('sms_list', msgs => { state.smsList = msgs; renderSMSList(); });
-socket.on('new_sms', msg => {
-  toast(`📩 SMS từ ${msg.from}`, 'info');
-  const exists = state.smsList.find(m => m.index === msg.index);
-  if (!exists) { state.smsList.unshift(msg); renderSMSList(); }
+socket.on('connect',       () => { socket.emit('request_sms'); socket.emit('request_status'); });
+socket.on('status_update', updateStatus);
+socket.on('sms_list',      msgs => { S.smsList = msgs; renderList(); });
+socket.on('new_sms',       msg  => {
+  if (!S.smsList.find(m => m.index === msg.index)) { S.smsList.unshift(msg); renderList(); }
+  toast(`📩 SMS mới từ ${msg.from}`, 'info');
 });
 socket.on('sent_sms', r => {
-  if (r.success) {
-    if (!state.sentMessages[r.number]) state.sentMessages[r.number] = [];
-    state.sentMessages[r.number].push({ body: r.message, time: r.timestamp });
-  }
+  if (!S.sentByNum[r.number]) S.sentByNum[r.number] = [];
+  S.sentByNum[r.number].push({ body: r.message, time: r.timestamp });
 });
-socket.on('gps_update', updateGPS);
 
-// ─── Status ──────────────────────────────────────────────
-function updateStatusUI(s) {
+// ──────────────────────────────────────────────────────────
+// Theme
+// ──────────────────────────────────────────────────────────
+function applyTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  document.getElementById('iconMoon').style.display = t === 'dark' ? '' : 'none';
+  document.getElementById('iconSun').style.display  = t === 'light' ? '' : 'none';
+  localStorage.setItem('theme', t);
+}
+function toggleTheme() {
+  applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+}
+applyTheme(localStorage.getItem('theme') || 'dark');
+
+// ──────────────────────────────────────────────────────────
+// Tabs
+// ──────────────────────────────────────────────────────────
+function switchTab(t) {
+  ['sms','modem'].forEach(n => {
+    document.getElementById('tab-'+n).classList.toggle('active', n === t);
+    document.getElementById('panel-'+n).classList.toggle('active', n === t);
+  });
+  if (t === 'modem') refreshStatus();
+}
+
+// ──────────────────────────────────────────────────────────
+// Views
+// ──────────────────────────────────────────────────────────
+function showView(v) {
+  ['welcome','detail','compose'].forEach(n =>
+    document.getElementById('view-'+n).classList.toggle('active', n === v)
+  );
+  if (v === 'compose') {
+    document.getElementById('newNum').focus();
+    document.getElementById('newText').value = '';
+    document.getElementById('newCC').textContent = '0 ký tự';
+    document.getElementById('newCCsms').textContent = '';
+  }
+  if (v === 'welcome') S.selected = null;
+}
+
+// ──────────────────────────────────────────────────────────
+// Status
+// ──────────────────────────────────────────────────────────
+function updateStatus(s) {
   const dot   = document.getElementById('connDot');
   const label = document.getElementById('connLabel');
-  const bars  = document.getElementById('signalBars');
-  const op    = document.getElementById('operatorName');
+  dot.className = 'dot ' + (s.connected ? 'online' : 'offline');
+  label.textContent = s.connected ? 'Đã kết nối' : 'Mất kết nối';
 
-  if (s.connected) {
-    dot.className = 'dot online';
-    label.textContent = 'Đã kết nối';
-  } else {
-    dot.className = 'dot offline';
-    label.textContent = 'Mất kết nối';
-  }
-
-  if (s.operator) op.textContent = s.operator;
-
+  if (s.operator) document.getElementById('operatorName').textContent = s.operator;
+  const bars = document.getElementById('signalBars');
   if (s.signal_pct !== undefined) {
-    const lvl = s.signal_pct > 75 ? 's4' : s.signal_pct > 50 ? 's3' : s.signal_pct > 25 ? 's2' : 's1';
-    bars.className = 'signal-bars ' + lvl;
+    bars.className = 'signal-bars ' + (s.signal_pct > 75 ? 's4' : s.signal_pct > 50 ? 's3' : s.signal_pct > 25 ? 's2' : 's1');
   }
 
-  document.getElementById('sModem').textContent   = s.connected ? 'Online' : 'Offline';
-  document.getElementById('sModem').className     = 'stat-val ' + (s.connected ? 'ok' : 'err');
-  document.getElementById('sOperator').textContent = s.operator || '--';
-  document.getElementById('sNetwork').textContent  = s.network  || '--';
-  document.getElementById('sSignal').textContent   = s.signal_dbm ? `${s.signal_dbm} dBm (${s.signal_pct}%)` : '--';
-  document.getElementById('sIMSI').textContent     = s.imsi || '--';
+  document.getElementById('sConn').textContent  = s.connected ? 'Online' : 'Offline';
+  document.getElementById('sConn').className    = 'stat-val ' + (s.connected ? 'ok' : 'err');
+  document.getElementById('sModel').textContent = s.model    || '--';
+  document.getElementById('sFW').textContent    = s.firmware || '--';
+  document.getElementById('sOp').textContent    = s.operator || '--';
+  document.getElementById('sNet').textContent   = s.network  || '--';
+  document.getElementById('sSig').textContent   = s.signal_dbm ? `${s.signal_dbm} dBm · ${s.signal_pct}%` : '--';
+  document.getElementById('sIMSI').textContent  = s.imsi       || '--';
+  document.getElementById('sNum').textContent   = s.own_number || '(không đọc được)';
 }
 
 function refreshStatus() {
-  fetch('/api/status').then(r => r.json()).then(updateStatusUI);
+  fetch('/api/status').then(r => r.json()).then(updateStatus);
 }
 
-// ─── Tabs ────────────────────────────────────────────────
-function switchTab(tab) {
-  state.currentTab = tab;
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-  document.getElementById('tab-' + tab).classList.add('active');
-  document.getElementById('panel-' + tab).classList.add('active');
-
-  const viewDetail  = document.getElementById('viewDetail');
-  const viewCompose = document.getElementById('viewCompose');
-  const viewGPS     = document.getElementById('viewGPS');
-
-  if (tab === 'gps') {
-    viewDetail.style.display  = 'none';
-    viewCompose.style.display = 'none';
-    viewGPS.style.display     = 'flex';
-    if (!state.mapInitialized) initMap();
-  } else if (tab === 'sms' || tab === 'status') {
-    viewGPS.style.display = 'none';
-    if (state.composeVisible) {
-      viewCompose.style.display = 'flex';
-      viewDetail.style.display  = 'none';
-    } else {
-      viewDetail.style.display  = 'flex';
-      viewCompose.style.display = 'none';
-    }
-  }
-}
-
-// ─── SMS ─────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────
+// SMS list
+// ──────────────────────────────────────────────────────────
 function loadSMS() {
   fetch('/api/sms/list').then(r => r.json()).then(msgs => {
-    state.smsList = msgs;
-    renderSMSList();
-    toast('Đã làm mới danh sách SMS', 'success');
+    S.smsList = msgs;
+    renderList();
+    toast('Đã làm mới danh sách', 'info');
   });
 }
 
-function filterSMS() {
-  const q = document.getElementById('searchInput').value.toLowerCase();
-  const items = document.querySelectorAll('.sms-item');
-  items.forEach(el => {
-    const text = el.textContent.toLowerCase();
-    el.style.display = text.includes(q) ? '' : 'none';
-  });
-}
-
-function renderSMSList() {
+function renderList() {
   const list = document.getElementById('smsList');
-  if (!state.smsList.length) {
-    list.innerHTML = '<div class="empty-state"><div class="empty-icon">📭</div><div>Không có tin nhắn</div></div>';
+  const q    = document.getElementById('searchBox').value.toLowerCase();
+  const msgs = S.smsList.filter(m =>
+    !q || m.from.toLowerCase().includes(q) || m.body.toLowerCase().includes(q)
+  );
+
+  const unread = S.smsList.filter(m => m.unread).length;
+  document.getElementById('smsMeta').textContent =
+    `${S.smsList.length} tin nhắn${unread ? ` · ${unread} chưa đọc` : ''}`;
+
+  if (!msgs.length) {
+    list.innerHTML = `<div class="empty"><div class="empty-icon">📭</div><div>${q ? 'Không tìm thấy' : 'Không có tin nhắn'}</div></div>`;
     return;
   }
 
-  list.innerHTML = state.smsList.map(m => `
-    <div class="sms-item ${m.unread ? 'unread' : ''} ${state.selectedIdx === m.index ? 'selected' : ''}"
-         id="sms-item-${m.index}" onclick="selectSMS('${m.index}')">
-      <div class="sms-from">
-        ${m.from || '(Ẩn danh)'}
-        <span class="idx">#${m.index}</span>
+  list.innerHTML = msgs.map(m => `
+    <div class="sms-item ${S.selected === m.index ? 'selected-item' : ''}" id="item-${m.index}" onclick="selectSMS('${m.index}')">
+      <input type="checkbox" onclick="e => e.stopPropagation()" onchange="toggleCheck('${m.index}', this.checked)"
+             ${S.checked.has(m.index) ? 'checked' : ''} onclick="event.stopPropagation()">
+      <div class="sms-content">
+        <div class="sms-from">
+          ${esc(m.from) || '(Ẩn danh)'}
+          ${m.unread ? '<span class="unread-dot"></span>' : ''}
+          <span class="sms-idx">#${m.index}</span>
+        </div>
+        <div class="sms-preview">${esc(m.body)}</div>
+        <div class="sms-time">${m.timestamp || ''}</div>
       </div>
-      <div class="sms-preview">${escHtml(m.body)}</div>
-      <div class="sms-time">${m.timestamp || ''}</div>
     </div>
   `).join('');
+
+  updateBulkBar();
+  document.getElementById('checkAll').checked =
+    msgs.length > 0 && msgs.every(m => S.checked.has(m.index));
 }
 
+function filterSMS() { renderList(); }
+
 function selectSMS(idx) {
-  state.selectedIdx = idx;
-  state.composeVisible = false;
+  S.selected = idx;
+  hideReply();
 
-  document.querySelectorAll('.sms-item').forEach(el => el.classList.remove('selected'));
-  const el = document.getElementById('sms-item-' + idx);
-  if (el) el.classList.add('selected');
+  document.querySelectorAll('.sms-item').forEach(el => el.classList.remove('selected-item'));
+  const el = document.getElementById('item-' + idx);
+  if (el) el.classList.add('selected-item');
 
-  const msg = state.smsList.find(m => m.index === idx);
+  const msg = S.smsList.find(m => m.index === idx);
   if (!msg) return;
 
-  document.getElementById('viewCompose').style.display = 'none';
-  document.getElementById('viewDetail').style.display  = 'flex';
-  document.getElementById('detailFrom').textContent    = msg.from || '(Ẩn danh)';
-  document.getElementById('btnDelete').style.display   = 'inline-flex';
+  document.getElementById('detailFrom').textContent = msg.from || '(Ẩn danh)';
+  document.getElementById('detailSub').textContent  = msg.timestamp || '';
 
+  const sent = S.sentByNum[msg.from] || [];
   const body = document.getElementById('detailBody');
-  const sent = state.sentMessages[msg.from] || [];
-
   body.innerHTML = `
-    <div class="msg-bubble incoming">
-      ${escHtml(msg.body)}
-      <div class="msg-time">${msg.timestamp || ''}</div>
+    <div class="bubble in">
+      ${esc(msg.body)}
+      <div class="bubble-time">${msg.timestamp || ''}</div>
     </div>
     ${sent.map(s => `
-      <div class="msg-bubble outgoing">
-        ${escHtml(s.body)}
-        <div class="msg-time">${s.time}</div>
+      <div class="bubble out">
+        ${esc(s.body)}
+        <div class="bubble-time">${s.time}</div>
       </div>
     `).join('')}
   `;
   body.scrollTop = body.scrollHeight;
+  showView('detail');
 
-  // Pre-fill reply number
-  document.getElementById('composeNumber').value = msg.from || '';
+  // Pre-fill reply
+  document.getElementById('replyNum').value = msg.from || '';
 }
 
-function deleteSelected() {
-  if (!state.selectedIdx) return;
+// ──────────────────────────────────────────────────────────
+// Bulk select
+// ──────────────────────────────────────────────────────────
+function toggleCheck(idx, checked) {
+  if (checked) S.checked.add(idx); else S.checked.delete(idx);
+  updateBulkBar();
+  const all = document.getElementById('checkAll');
+  all.checked = S.smsList.length > 0 && S.smsList.every(m => S.checked.has(m.index));
+}
+
+function toggleSelectAll(checked) {
+  const q    = document.getElementById('searchBox').value.toLowerCase();
+  const msgs = S.smsList.filter(m => !q || m.from.toLowerCase().includes(q) || m.body.toLowerCase().includes(q));
+  msgs.forEach(m => { if (checked) S.checked.add(m.index); else S.checked.delete(m.index); });
+  renderList();
+}
+
+function clearSelection() {
+  S.checked.clear();
+  document.getElementById('checkAll').checked = false;
+  renderList();
+}
+
+function updateBulkBar() {
+  const bar   = document.getElementById('bulkBar');
+  const label = document.getElementById('bulkLabel');
+  const cnt   = document.getElementById('selectedCount');
+  if (S.checked.size > 0) {
+    bar.classList.add('visible');
+    label.textContent = `${S.checked.size} tin đã chọn`;
+    cnt.textContent   = `${S.checked.size} đã chọn`;
+  } else {
+    bar.classList.remove('visible');
+    cnt.textContent = '';
+  }
+}
+
+async function deleteSelected() {
+  if (!S.checked.size) return;
+  const indices = [...S.checked];
+  const ok = confirm(`Xoá ${indices.length} tin nhắn đã chọn?`);
+  if (!ok) return;
+
+  const r = await fetch('/api/sms/delete-bulk', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ indices })
+  }).then(r => r.json());
+
+  if (r.success) {
+    toast(`Đã xoá ${r.count} tin nhắn`, 'success');
+    S.smsList = S.smsList.filter(m => !indices.includes(m.index));
+    S.checked.clear();
+    if (indices.includes(S.selected)) showView('welcome');
+    renderList();
+  } else {
+    toast('Có lỗi khi xoá', 'error');
+  }
+}
+
+// ──────────────────────────────────────────────────────────
+// Delete single
+// ──────────────────────────────────────────────────────────
+async function deleteCurrentSMS() {
+  if (!S.selected) return;
   if (!confirm('Xoá tin nhắn này?')) return;
-  fetch(`/api/sms/delete/${state.selectedIdx}`, { method: 'DELETE' })
-    .then(r => r.json())
-    .then(r => {
-      if (r.success) {
-        state.smsList = state.smsList.filter(m => m.index !== state.selectedIdx);
-        state.selectedIdx = null;
-        renderSMSList();
-        document.getElementById('detailFrom').textContent = 'Chọn tin nhắn để xem';
-        document.getElementById('detailBody').innerHTML = '';
-        document.getElementById('btnDelete').style.display = 'none';
-        toast('Đã xoá tin nhắn', 'success');
-      }
-    });
+  const r = await fetch(`/api/sms/delete/${S.selected}`, {method:'DELETE'}).then(r => r.json());
+  if (r.success) {
+    S.smsList = S.smsList.filter(m => m.index !== S.selected);
+    S.selected = null;
+    renderList();
+    showView('welcome');
+    toast('Đã xoá tin nhắn', 'success');
+  } else {
+    toast('Không xoá được', 'error');
+  }
 }
 
-// ─── Compose ─────────────────────────────────────────────
-function showCompose() {
-  state.composeVisible = true;
-  document.getElementById('viewDetail').style.display  = 'none';
-  document.getElementById('viewCompose').style.display = 'flex';
-  document.getElementById('composeText').focus();
+// ──────────────────────────────────────────────────────────
+// Delete all modal
+// ──────────────────────────────────────────────────────────
+function openDeleteAllModal()  { document.getElementById('deleteAllModal').classList.add('open'); }
+function closeDeleteAllModal() { document.getElementById('deleteAllModal').classList.remove('open'); }
+
+async function doDeleteAll() {
+  const flag = parseInt(document.querySelector('input[name="delFlag"]:checked').value);
+  closeDeleteAllModal();
+  const r = await fetch('/api/sms/delete-bulk', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ flag })
+  }).then(r => r.json());
+
+  if (r.success) {
+    toast('Đã xoá tin nhắn thành công', 'success');
+    loadSMS();
+    showView('welcome');
+  } else {
+    toast('Có lỗi khi xoá hàng loạt', 'error');
+  }
 }
 
-function hideCompose() {
-  state.composeVisible = false;
-  document.getElementById('viewCompose').style.display = 'none';
-  document.getElementById('viewDetail').style.display  = 'flex';
-}
-
-function updateCharCount() {
-  const txt = document.getElementById('composeText').value;
-  document.getElementById('charCount').textContent = `${txt.length} / 160 ký tự`;
-}
-
-function sendSMS() {
-  const number  = document.getElementById('composeNumber').value.trim();
-  const message = document.getElementById('composeText').value.trim();
-
-  if (!number)  { toast('Nhập số điện thoại', 'error'); return; }
+// ──────────────────────────────────────────────────────────
+// Send SMS
+// ──────────────────────────────────────────────────────────
+async function _doSend(number, message, btnEl) {
+  if (!number) { toast('Nhập số điện thoại', 'error'); return; }
   if (!message) { toast('Nhập nội dung tin nhắn', 'error'); return; }
 
-  const btn = document.getElementById('btnSend');
-  btn.disabled = true;
-  btn.innerHTML = '<div class="loading"></div> Đang gửi...';
+  const orig = btnEl.innerHTML;
+  btnEl.disabled = true;
+  btnEl.innerHTML = '<div class="spin"></div> Đang gửi...';
 
-  fetch('/api/sms/send', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ number, message })
-  })
-  .then(r => r.json())
-  .then(r => {
+  try {
+    const r = await fetch('/api/sms/send', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ number, message })
+    }).then(r => r.json());
+
     if (r.success) {
       toast(`✅ Đã gửi tới ${number}`, 'success');
-      if (!state.sentMessages[number]) state.sentMessages[number] = [];
-      state.sentMessages[number].push({ body: message, time: new Date().toLocaleString('vi-VN') });
-      document.getElementById('composeText').value = '';
-      updateCharCount();
-      hideCompose();
+      if (!S.sentByNum[number]) S.sentByNum[number] = [];
+      S.sentByNum[number].push({ body: message, time: r.timestamp });
+      return true;
     } else {
       toast(`❌ Lỗi: ${r.error}`, 'error');
+      return false;
     }
-  })
-  .catch(() => toast('❌ Không kết nối được server', 'error'))
-  .finally(() => {
-    btn.disabled = false;
-    btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg> Gửi SMS`;
-  });
-}
-
-// ─── GPS ─────────────────────────────────────────────────
-function initMap() {
-  state.mapInitialized = true;
-  const map = L.map('map', { zoomControl: true }).setView([21.0278, 105.8342], 13);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-    attribution: '© OpenStreetMap © CARTO',
-    maxZoom: 19
-  }).addTo(map);
-
-  const icon = L.divIcon({
-    className: '',
-    html: `<div style="width:16px;height:16px;background:var(--accent);border-radius:50%;border:3px solid #fff;box-shadow:0 0 12px var(--accent)"></div>`,
-    iconSize: [16, 16],
-    iconAnchor: [8, 8]
-  });
-
-  state.leafletMap = map;
-  state.marker = L.marker([21.0278, 105.8342], { icon }).addTo(map);
-  state.circle = L.circle([21.0278, 105.8342], { radius: 50, color: 'var(--accent)', fillOpacity: 0.1 }).addTo(map);
-}
-
-function updateGPS(data) {
-  if (!data.fix) {
-    document.getElementById('gpsLat').textContent   = '-- Chưa có fix';
-    document.getElementById('gpsLon').textContent   = '--';
-    document.getElementById('gpsAlt').textContent   = '--';
-    document.getElementById('gpsSpeed').textContent = '--';
-    return;
-  }
-
-  document.getElementById('noFixOverlay').style.display = 'none';
-  document.getElementById('gpsStatusPill').style.display = 'flex';
-
-  const lat = data.latitude,  lon = data.longitude;
-  document.getElementById('gpsLat').textContent   = lat.toFixed(6) + '°';
-  document.getElementById('gpsLon').textContent   = lon.toFixed(6) + '°';
-  document.getElementById('gpsAlt').textContent   = data.altitude ? data.altitude.toFixed(1) + ' m' : '--';
-  document.getElementById('gpsSpeed').textContent = data.speed_knots ? (data.speed_knots * 1.852).toFixed(1) + ' km/h' : '0 km/h';
-  document.getElementById('gpsSats').textContent  = data.satellites || '--';
-  document.getElementById('gpsTime').textContent  = data.timestamp || data.time || '--';
-
-  document.getElementById('gpsLat').className   = 'coord-value';
-  document.getElementById('gpsLon').className   = 'coord-value';
-
-  if (state.leafletMap && state.marker) {
-    state.marker.setLatLng([lat, lon]);
-    state.circle.setLatLng([lat, lon]);
-    if (data.accuracy) state.circle.setRadius(data.accuracy);
-    state.leafletMap.panTo([lat, lon]);
+  } catch(e) {
+    toast('❌ Lỗi kết nối server', 'error');
+    return false;
+  } finally {
+    btnEl.disabled = false;
+    btnEl.innerHTML = orig;
   }
 }
 
-function startGPS() {
-  fetch('/api/gps/start', { method: 'POST' })
-    .then(r => r.json())
-    .then(r => {
-      if (r.success) {
-        state.gpsActive = true;
-        document.getElementById('btnStartGPS').style.display = 'none';
-        document.getElementById('btnStopGPS').style.display  = 'inline-flex';
-        toast('GPS đã bật', 'success');
-        switchTab('gps');
-      } else {
-        toast('❌ ' + (r.error || 'Không bật được GPS'), 'error');
-      }
-    });
+async function sendNew() {
+  const number  = document.getElementById('newNum').value.trim();
+  const message = document.getElementById('newText').value.trim();
+  const ok = await _doSend(number, message, document.getElementById('btnSendNew'));
+  if (ok) {
+    document.getElementById('newText').value = '';
+    updateCC('newText', 'newCC');
+    showView('welcome');
+  }
 }
 
-function stopGPS() {
-  fetch('/api/gps/stop', { method: 'POST' })
-    .then(() => {
-      state.gpsActive = false;
-      document.getElementById('btnStartGPS').style.display = 'inline-flex';
-      document.getElementById('btnStopGPS').style.display  = 'none';
-      document.getElementById('gpsStatusPill').style.display = 'none';
-      toast('GPS đã tắt', 'info');
-    });
+function replyTo() {
+  const bar = document.getElementById('replyBar');
+  bar.style.display = bar.style.display === 'none' ? '' : 'none';
+  if (bar.style.display !== 'none') document.getElementById('replyText').focus();
+}
+function hideReply() { document.getElementById('replyBar').style.display = 'none'; }
+
+async function sendReply() {
+  const number  = document.getElementById('replyNum').value.trim();
+  const message = document.getElementById('replyText').value.trim();
+  const ok = await _doSend(number, message, document.getElementById('btnReplySend'));
+  if (ok) {
+    document.getElementById('replyText').value = '';
+    updateCC('replyText', 'replyCC');
+    hideReply();
+    // Re-render bubbles
+    if (S.selected) selectSMS(S.selected);
+  }
 }
 
-function getOnceGPS() {
-  toast('Đang lấy vị trí...', 'info');
-  fetch('/api/gps/location')
-    .then(r => r.json())
-    .then(data => {
-      if (data.fix) {
-        updateGPS(data);
-        toast(`📍 ${data.latitude.toFixed(5)}, ${data.longitude.toFixed(5)}`, 'success');
-        switchTab('gps');
-      } else {
-        toast('⚠️ Chưa có tín hiệu GPS', 'error');
-      }
-    });
+// ──────────────────────────────────────────────────────────
+// Char count
+// ──────────────────────────────────────────────────────────
+function updateCC(textId, ccId) {
+  const txt = document.getElementById(textId).value;
+  const len = txt.length;
+  const el  = document.getElementById(ccId);
+  // UCS2: 70 ký tự/SMS nếu có dấu; 160 nếu ASCII
+  const hasUnicode = /[^\u0000-\u007F]/.test(txt);
+  const perSMS = hasUnicode ? 70 : 160;
+  const smsCnt = Math.ceil(len / perSMS) || 1;
+  el.textContent = `${len} ký tự`;
+  if (ccId === 'newCC') {
+    const ccSMS = document.getElementById('newCCsms');
+    if (ccSMS) ccSMS.textContent = hasUnicode
+      ? `UCS2 · ${smsCnt} SMS (${perSMS} ký tự/SMS)`
+      : `GSM · ${smsCnt} SMS`;
+  }
 }
 
-// ─── Helpers ─────────────────────────────────────────────
-function escHtml(str) {
-  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-
+// ──────────────────────────────────────────────────────────
+// Toast
+// ──────────────────────────────────────────────────────────
 function toast(msg, type = 'info') {
-  const container = document.getElementById('toast-container');
-  const el = document.createElement('div');
+  const wrap = document.getElementById('toasts');
+  const el   = document.createElement('div');
   el.className = `toast ${type}`;
-  el.innerHTML = msg;
-  container.appendChild(el);
-  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity 0.3s'; }, 3000);
-  setTimeout(() => el.remove(), 3400);
+  el.textContent = msg;
+  wrap.appendChild(el);
+  setTimeout(() => { el.style.transition = 'opacity .3s'; el.style.opacity = '0'; }, 2800);
+  setTimeout(() => el.remove(), 3200);
 }
 
-// ─── Init ────────────────────────────────────────────────
-window.addEventListener('DOMContentLoaded', () => {
-  loadSMS();
-  refreshStatus();
+// ──────────────────────────────────────────────────────────
+// Helpers
+// ──────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+}
+
+// ──────────────────────────────────────────────────────────
+// Keyboard shortcuts
+// ──────────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (e.ctrlKey && e.key === 'Enter') {
+    const v = document.querySelector('.view.active')?.id;
+    if (v === 'view-compose') sendNew();
+    if (v === 'view-detail' && document.getElementById('replyBar').style.display !== 'none') sendReply();
+  }
+  if (e.key === 'Escape') {
+    hideReply();
+    closeDeleteAllModal();
+  }
 });
 
-// Enter to send
-document.addEventListener('keydown', e => {
-  if (e.ctrlKey && e.key === 'Enter' && state.composeVisible) sendSMS();
+// Close modal on overlay click
+document.getElementById('deleteAllModal').addEventListener('click', function(e) {
+  if (e.target === this) closeDeleteAllModal();
 });
+
+// ──────────────────────────────────────────────────────────
+// Init
+// ──────────────────────────────────────────────────────────
+loadSMS();
+refreshStatus();
 </script>
 </body>
 </html>
