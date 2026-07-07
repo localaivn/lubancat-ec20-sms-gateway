@@ -459,4 +459,4 @@ if __name__ == "__main__":
 |   http://0.0.0.0:5000                        |
 +----------------------------------------------+
 """)
-    socketio.run(app, host="0.0.0.0", port=WEB_PORT, debug=False)
+    socketio.run(app, host="0.0.0.0", port=WEB_PORT, debug=False, allow_unsafe_werkzeug=True)
