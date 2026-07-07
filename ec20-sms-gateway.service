@@ -1,0 +1,20 @@
+[Unit]
+Description=EC20 SMS Gateway Service
+Documentation=https://github.com/localaivn/lubancat-ec20-sms-gateway
+After=network.target serial-getty@ttyUSB2.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/ec20-sms-gateway
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/usr/bin/python3 /opt/ec20-sms-gateway/ec20_server.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ec20-sms-gateway
+
+[Install]
+WantedBy=multi-user.target
